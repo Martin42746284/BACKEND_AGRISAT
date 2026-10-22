@@ -1,5 +1,12 @@
 """Port 1:1 du cache parcelles de src/server.ts (lignes ~96-209) : TTL 30s avec
-stale-while-revalidate (revalidation en arrière-plan) et timeout de requête DB à 20s."""
+stale-while-revalidate (revalidation en arrière-plan) et timeout de requête DB
+configurable (PARCELLES_QUERY_TIMEOUT_S, 20 s par défaut).
+
+La requête charge les 37 colonnes de `parcelles`, dont des JSONB volumineux
+(time_series_s1/s2, coordinates). Sur un lien lent vers une base distante, elle
+peut dépasser le délai : le délai est donc réglable via la variable
+d'environnement `PARCELS_QUERY_TIMEOUT_S`.
+"""
 
 from __future__ import annotations
 
@@ -9,13 +16,14 @@ import time
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import async_session_maker
 from app.models import Parcelle
 
 logger = logging.getLogger("agrisat.cache")
 
 PARCELLES_CACHE_TTL_S = 30.0
-PARCELLES_QUERY_TIMEOUT_S = 20.0
+PARCELLES_QUERY_TIMEOUT_S = float(settings.parcels_query_timeout_s)
 
 _cache: dict | None = None  # {"expires_at": float, "rows": list[Parcelle]}
 _inflight_request: asyncio.Task | None = None

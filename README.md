@@ -99,7 +99,51 @@ python -m venv .venv
 # macOS/Linux :
 source .venv/bin/activate
 
-pip install -e .
+pip install -e ".[test]"   # "[test]" ajoute pytest pour la suite de tests
+```
+
+### Données volumineuses (Git LFS)
+
+`app/data/parcelles_ftw.parquet` (GeoParquet, ~176 Mo) est versionné via
+**Git LFS**. Sans `git lfs`, le fichier présent dans le dépôt n'est qu'un
+**pointeur de 134 octets** : `pyarrow` le refuse alors
+(`ArrowInvalid: Parquet magic bytes not found in footer`) et
+`GET /api/all-parcels` renvoie une erreur 500.
+
+```bash
+git lfs install          # une fois par machine
+git lfs pull             # récupère le vrai fichier
+```
+
+Vérification : `ls -l app/data/parcelles_ftw.parquet` doit afficher environ
+**176 794 822** octets, pas 134.
+
+### Poids du modèle de traçage VHR
+
+Le service de traçage (`agri_field_segmentation/src/serve_vhr.py`) utilise
+`data/vhr/weights/delineate_jecam_v2_affine_annotations.pt` dans le projet
+`sibling`. Sans ce fichier, le service refuse de démarrer
+(`Poids absents : …`) et `POST /api/zone-parcels` renvoie **503**.
+
+Le checkpoint correspond à `epoch30.pt` du run
+`outputs/vhr_training/jecam_v2_affine_annotations/` (sélection par F1 sur les
+annotations complètes de validation, cf. `train_vhr.py`). Il est reproduit à
+l'identique par :
+
+```bash
+cp agri_field_segmentation/outputs/vhr_training/jecam_v2_affine_annotations/weights/epoch30.pt \
+   agri_field_segmentation/data/vhr/weights/delineate_jecam_v2_affine_annotations.pt
+```
+
+### Base de données lente
+
+`GET /api/parcelles` charge les 37 colonnes de `parcelles`, dont des JSONB
+volumineux (`time_series_s1/s2`, `coordinates`). Sur une base distante et un
+réseau lent, la requête peut dépasser le délai imparti et l'API répond alors
+**503** au lieu de servir les parcelles. Le délai est réglable :
+
+```bash
+PARCELS_QUERY_TIMEOUT_S=90   # défaut : 20 (suffisant pour une base proche)
 ```
 
 ## Configuration

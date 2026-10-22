@@ -185,7 +185,22 @@ def zone_parcels(
 
 
 def all_zone_parcels() -> dict[str, Any]:
-    """Retourne toutes les parcelles FTW disponibles dans le fichier regional."""
+    """Retourne toutes les parcelles FTW disponibles dans le fichier regional.
+
+    ATTENTION — usage memoire eleve : le fichier regional couvre
+    environ 3.8 millions de parcelles. La conversion WKB -> Shapely
+    (`shapely.from_wkb`) represente a elle seule ~3.4 Go, et la
+    serialisation GeoJSON complete bien plus encore. Sur une machine
+    dispose de moins de ~8 Go, cet appel peut se terminer par un
+    MemoryError ou faire tuer le processus backend.
+
+    La voie utilisee en production est `zone_parcels()` (une zone a la
+    fois), qui filtre par emprise sur les colonnes `xmin/ymin/xmax/ymax`
+    et ne materialise qu'une centaine de geometries.
+
+    Servir `/api/all-parcels` requiert donc un filtrage par emprise
+    cote serveur (tuiles), pas un chargement integral.
+    """
     import pyarrow.parquet as pq
 
     meta = _metadata()

@@ -5,6 +5,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = ""
+    # Delai maximal d'une requete parcelles a la base. 20 s par defaut (liaison
+    # proche) ; a augmenter quand la base est eloigne et le lien lent : la
+    # requete complete (37 colonnes, JSONB volumineux) peut depasser 20 s sur un
+    # lien a faible debit, et le cache renvoie alors une erreur 503 au lieu de
+    # servir des donnees.
+    parcels_query_timeout_s: float = 20.0
     gee_service_account_key: str = "{}"
     hf_model_url: str = ""
     # Poids YOLO de segmentation de parcelles embarqué (vide : app/data/models/field_segmentation).
