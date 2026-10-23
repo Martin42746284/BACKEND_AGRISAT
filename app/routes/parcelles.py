@@ -12,7 +12,7 @@ from app import cache
 from app.db import async_session_maker
 from app.errors import parse_or_400
 from app.models import Parcelle
-from app.schemas import DeleteParcelleParams, ParcelleCreate
+from app.schemas import DeleteParcelleParams, ParcelleCreate, ParcelleUpdate
 
 logger = logging.getLogger("agrisat.routes.parcelles")
 
@@ -132,3 +132,29 @@ async def delete_parcelle(parcelle_id: str) -> Response:
 
     cache.invalidate()
     return Response(status_code=204)
+
+
+@router.patch("/api/parcelles/{parcelle_id}")
+async def update_parcelle(parcelle_id: str, request: Request) -> JSONResponse:
+    try:
+        parsed = DeleteParcelleParams.model_validate({"id": parcelle_id})
+    except ValidationError:
+        return JSONResponse(status_code=400, content={"error": "Identifiant invalide"})
+
+    parsed_update = parse_or_400(ParcelleUpdate, await request.json(), "Données de mise à jour invalides")
+
+    async with async_session_maker() as session:
+        existing = await session.get(Parcelle, uuid.UUID(parsed.id))
+        if existing is None:
+            return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
+
+        update_data = parsed_update.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(existing, field, value)
+
+        await session.commit()
+        await session.refresh(existing)
+        result = _serialize(existing)
+
+    cache.invalidate()
+    return JSONResponse(content=result)

@@ -170,3 +170,32 @@ class DeleteParcelleParams(BaseModel):
         except ValueError as exc:
             raise ValueError("doit être un UUID valide") from exc
         return v
+
+
+class ParcelleUpdate(BaseModel):
+    """Champs modifiables lors d'une correction humaine sur une parcelle."""
+    culture_detected: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=100.0)
+    verdict: str | None = None
+    details: str | None = None
+    saison: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AuditEntryCreate(BaseModel):
+    """Création d'une entrée d'audit (journal des actions utilisateurs)."""
+    user_name: str = Field(min_length=1, max_length=200)
+    action: str = Field(min_length=1, max_length=100)  # ex. "correction", "rejet", "observation", "connexion"
+    object: str = Field(min_length=1, max_length=300)  # ex. "Parcelle <id>", "Session analyste"
+
+
+class AuditEntryResponse(BaseModel):
+    """Entrée d'audit renvoyée par l'API."""
+    id: str
+    at: str
+    user_name: str
+    action: str
+    object: str
+
+    model_config = ConfigDict(populate_by_name=True)

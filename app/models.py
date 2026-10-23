@@ -119,3 +119,23 @@ class VhrRefinement(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (Index("vhr_refinements_parcelle_id_idx", "parcelle_id"),)
+
+
+class AuditEntry(Base):
+    """Journal d'audit : actions des utilisateurs sur les parcelles (corrections,
+    rejets, observations terrain, connexions, etc.).
+
+    Table dédiée car le backend n'a pas de table `users` native ; l'utilisateur
+    est identifié par son nom/email (string) pour simplifier le déploiement
+    initial sans système d'authentification complet.
+    """
+
+    __tablename__ = "audit_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_name: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)  # ex. "correction", "rejet", "observation", "connexion"
+    object: Mapped[str] = mapped_column(Text, nullable=False)  # ex. "Parcelle <id>", "Session analyste"
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("audit_entries_created_at_idx", "created_at"),)
