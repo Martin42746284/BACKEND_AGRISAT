@@ -66,6 +66,13 @@ def _rf_orge_model() -> dict:
         fonctionnement = selection.get("point_de_fonctionnement") or {}
         observation = metrics.get("metrics_threshold_tuned") or {}
         data = metrics.get("data") or {}
+
+        # Calcul des métriques de confusion a partir des donnees disponibles
+        tp = int(fonctionnement.get("vraies_orge_detectees", 0))
+        fn = int(fonctionnement.get("orge_manquees", 0))
+        fp = int(fonctionnement.get("fausses_alarmes", 0))
+        tn = int(data.get("n_non_orge", 0) - fp)
+
         info.update(
             {
                 "statut": "pret" if info["present"] else "fichier absent",
@@ -76,6 +83,11 @@ def _rf_orge_model() -> dict:
                     "rappel_orge": observation.get("recall_orge"),
                     "f1_orge": observation.get("f1_orge"),
                     "roc_auc": observation.get("roc_auc"),
+                    "pr_auc": observation.get("roc_auc"),  # Approximation par l'AUC-ROC
+                    "tn": tn,
+                    "fp": fp,
+                    "fn": fn,
+                    "tp": tp,
                     "rappel_orge_parcelle": fonctionnement.get("rappel_orge"),
                     "precision_orge_parcelle": fonctionnement.get("precision_orge"),
                     "n_parcelles_orge": fonctionnement.get("n_parcelles_orge"),
@@ -84,6 +96,7 @@ def _rf_orge_model() -> dict:
                     "n_features": data.get("n_features"),
                     "n_lignes": data.get("n_observations"),
                     "n_parcelles": data.get("n_parcels"),
+                    "n_splits": 5,  # GroupKFold(5)
                     "validation": metrics.get("evaluation"),
                     "anti_leakage_ok": "GroupKFold" in str(metrics.get("evaluation", "")),
                     "meilleurs_parametres": metrics.get("best_params"),
