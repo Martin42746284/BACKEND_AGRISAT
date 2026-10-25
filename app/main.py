@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.ensure_future(_warmup())
 
-    # Auto-start du service de tracage VHR (serve_vhr.py, modele delineate_jecam_complet.pt)
+    # Auto-start du service de tracage VHR (serve_vhr.py, modele delineate_jecam_v3_precision.pt)
     # si VHR_SERVICE_DIR est renseigne : evite de demarrer le service a la main a chaque
     # session. Detache du backend : survit a un redemarrage (--reload inclus), et rien
     # n'est lance si le service repond deja. Details dans app/services/vhr_launcher.py.

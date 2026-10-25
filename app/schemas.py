@@ -157,6 +157,27 @@ class AnalyzeLatestQuery(BaseModel):
     _v = field_validator("lat", "lng")(_finite)
 
 
+class AnalyzeParcelRequest(BaseModel):
+    """Analyse d'une seule parcelle (bouton « Analyser » du frontend).
+
+    Le contour est obligatoire : l'analyse porte sur cette parcelle uniquement,
+    jamais sur les parcelles voisines. `parcel_id` identifie la ligne à mettre à
+    jour dans `parcelles` ; s'il est absent (contour tracé à l'écran, pas encore
+    en base), la ligne est créée.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    zoom: float | None = Field(default=None, ge=1, le=21)
+    polygon: list[Point] = Field(min_length=3, max_length=5_000)
+    parcel_id: str | None = Field(default=None, alias="parcelId")
+    force: bool = False
+
+    _v = field_validator("lat", "lng")(_finite)
+
+
 class DeleteParcelleParams(BaseModel):
     id: str
 

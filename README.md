@@ -120,20 +120,26 @@ Vérification : `ls -l app/data/parcelles_ftw.parquet` doit afficher environ
 
 ### Poids du modèle de traçage VHR
 
-Le service de traçage (`agri_field_segmentation/src/serve_vhr.py`) utilise
-`data/vhr/weights/delineate_jecam_v2_affine_annotations.pt` dans le projet
-`sibling`. Sans ce fichier, le service refuse de démarrer
-(`Poids absents : …`) et `POST /api/zone-parcels` renvoie **503**.
+Le service de traçage (`agri_field_segmentation/src/serve_vhr.py`) utilise le
+même modèle que `/api/field-segmentation` : le checkpoint de segmentation
+`data/vhr/weights/delineate_jecam_v3_precision.pt` (clone du fichier
+`app/data/models/field_segmentation/parcel_segmentation_yolo.pt`). La
+détection d'une zone (`/api/zone-parcels`) télécharge les tuiles Esri, lance le
+modèle YOLO11-seg fenêtre par fenêtre puis nettoie les contours.
 
-Le checkpoint correspond à `epoch30.pt` du run
-`outputs/vhr_training/jecam_v2_affine_annotations/` (sélection par F1 sur les
-annotations complètes de validation, cf. `train_vhr.py`). Il est reproduit à
-l'identique par :
+Le checkpoint n'est pas versionné. Le service refuse de démarrer
+(`Poids absents : …`) si ni le fichier local ni le modèle embarqué n'existent.
+Copy du produit final :
 
 ```bash
-cp agri_field_segmentation/outputs/vhr_training/jecam_v2_affine_annotations/weights/epoch30.pt \
-   agri_field_segmentation/data/vhr/weights/delineate_jecam_v2_affine_annotations.pt
+cp agri_field_segmentation/outputs/vhr_training/jecam_v3/weights/best.pt \\
+   agri_field_segmentation/data/vhr/weights/delineate_jecam_v3_precision.pt
 ```
+
+Si le fichier est absent, `serve_vhr.py` reporte automatiquement sur le
+service embarqué du backend ; pour l'exploiter directement, il doit exister
+soit `data/vhr/weights/delineate_jecam_v3_precision.pt`, soit la variable
+`VHR_WEIGHTS`.
 
 ### Base de données lente
 

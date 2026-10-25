@@ -16,6 +16,7 @@ import asyncio
 import logging
 import math
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, TypeVar
 
@@ -49,6 +50,14 @@ from app.services.field_watershed import (
     simplify_polygon,
     trace_label_contours,
     watershed_segment,
+)
+from app.services.parcel_registry import (
+    as_number,
+    as_string,
+    as_string_array,
+    find_analyzed_parcel_in_session,
+    filter_analyzed_candidates,
+    row_has_analysis,
 )
 
 logger = logging.getLogger("agrisat.automatic_parcels")
@@ -739,16 +748,10 @@ async def _discover_agricultural_parcels(lat: float, lng: float, radius_km: floa
 # ── Analyse des candidats + persistance ──
 
 
-def _as_number(value: Any) -> float | None:
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
-
-
-def _as_string(value: Any) -> str | None:
-    return value if isinstance(value, str) and len(value) > 0 else None
-
-
-def _as_string_array(value: Any) -> list[str]:
-    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+# Convertisseurs partagés avec `app.services.parcel_registry` (alias historiques).
+_as_number = as_number
+_as_string = as_string
+_as_string_array = as_string_array
 
 
 async def _analyze_candidate(candidate: dict[str, Any], config: dict[str, float]) -> dict[str, Any]:
@@ -850,8 +853,29 @@ async def _save_automatic_analysis(candidate: dict[str, Any], analysis: dict[str
     }
 
     async with async_session_maker() as session:
-        existing = (await session.execute(select(Parcelle).where(Parcelle.label == candidate["id"]))).scalars().first()
+        existing = None
+        candidate_id = str(candidate.get("id") or "")
+        try:
+            existing = await session.get(Parcelle, uuid.UUID(candidate_id))
+        except (ValueError, AttributeError, TypeError):
+            existing = None
+        if existing is None:
+            existing = (await session.execute(select(Parcelle).where(Parcelle.label == candidate["id"]))).scalars().first()
+
+        if existing is not None and row_has_analysis(existing):
+            # Parcelle déjà analysée : les données enregistrées ne bougent plus.
+            logger.info("Parcelle %s déjà analysée : enregistrement ignoré.", existing.label)
+            return
+
+        # La même parcelle peut être redécouverte sous un autre identifiant (contour
+        # retracé) : on cherche aussi une ligne déjà analysée à proximité.
+        nearby = await find_analyzed_parcel_in_session(session, values["center_lat"], values["center_lng"])
+        if nearby is not None:
+            logger.info("Parcelle déjà analysée (%s) : enregistrement ignoré.", nearby.label)
+            return
+
         if existing:
+            values["label"] = existing.label
             for key, value in values.items():
                 setattr(existing, key, value)
         else:
@@ -951,6 +975,11 @@ async def detect_automatic_parcels(request: dict[str, Any]) -> dict[str, Any]:
         # de découverte ne sert que si aucune n'a encore été tracée dans le rayon.
         traced_candidates = _traced_parcel_candidates(request.get("tracedParcels") or [], lat, lng, radius_km)
         candidates = traced_candidates or await _discover_agricultural_parcels(lat, lng, radius_km)
+        # Une parcelle déjà analysée et enregistrée en base n'est jamais reclassée : ses
+        # données restent celles de la première analyse, même si elle tombe dans le
+        # rayon de cette nouvelle analyse.
+        candidates, already_analyzed = await filter_analyzed_candidates(candidates, lat, lng, radius_km * 1000)
+        skipped_count = len(already_analyzed)
         config = {"baseTemperature": base_temperature, "threshold": threshold, "periodDays": period_days}
         analyzed_candidates = candidates[:MAX_CANDIDATES]
         watershed_fallback = any(c["tags"].get("source") == "gee-watershed-segmentation" for c in analyzed_candidates)
@@ -992,14 +1021,21 @@ async def detect_automatic_parcels(request: dict[str, Any]) -> dict[str, Any]:
         else:
             notice = None
 
+        if skipped_count:
+            notice = (
+                f"{skipped_count} parcelle(s) déjà analysée(s) ont été ignorées : leurs données enregistrées restent inchangées. "
+                + (notice or "")
+            )
+
         return {
             "center": {"lat": lat, "lng": lng},
             "radius_km": radius_km,
             "base_temperature": base_temperature,
             "threshold": threshold,
             "period_days": period_days,
-            "candidates_found": len(candidates),
+            "candidates_found": len(candidates) + skipped_count,
             "analyzed_count": sum(1 for p in parcels if p["analysis"] is not None),
+            "already_analyzed_count": skipped_count,
             "parcels": parcels,
             "notice": notice,
         }
@@ -1020,6 +1056,7 @@ async def detect_automatic_parcels(request: dict[str, Any]) -> dict[str, Any]:
             "period_days": period_days,
             "candidates_found": 0,
             "analyzed_count": 0,
+            "already_analyzed_count": 0,
             "parcels": [],
             "notice": notice,
         }

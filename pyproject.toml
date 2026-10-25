@@ -24,6 +24,9 @@ dependencies = [
     "pillow>=10,<14",  # décodage des images de /api/field-segmentation (Pillow 13 requis par opencv 5 / ultralytics 8.4)
     "torch>=2.0,<3",  # inférence locale du modèle YOLO de segmentation (CPU ou GPU)
     "ultralytics>=8.3,<9",  # chargement et exécution de parcel_segmentation_yolo.pt
+    "geopandas>=1.0,<2",  # service de traçage VHR (lecture/écriture GeoJSON)
+    "affine>=3,<4",  # géoréférencement des tuiles Esri
+    "rasterio>=1.4,<2",  # rasterisation des contours dans filtre_non_agricole
 ]
 
 [project.optional-dependencies]

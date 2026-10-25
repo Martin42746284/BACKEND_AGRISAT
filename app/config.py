@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Passer à false en développement pour ne pas payer ~20 s à chaque --reload.
     warmup_models: bool = True
     vhr_model_url: str = "http://localhost:8010"
-    # Auto-start du service de tracage VHR (serve_vhr.py, modele delineate_jecam_complet.pt).
+    # Auto-start du service de tracage VHR (serve_vhr.py, modele delineate_jecam_v3_precision.pt).
     # vhr_service_dir vide : pas d'auto-start (le service doit etre lance a la main).
     # vhr_service_python vide : utilise le venv du service s'il existe, sinon le python courant.
     vhr_service_dir: str = ""

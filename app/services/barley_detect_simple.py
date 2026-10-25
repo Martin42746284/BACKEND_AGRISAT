@@ -30,6 +30,11 @@ from app.services.analyze_parcel import (
     polygon_centroid,
 )
 from app.services.automatic_parcels import fetch_growing_degree_days
+from app.services.parcel_registry import (
+    filter_analyzed_candidates,
+    find_analyzed_parcel_in_session,
+    row_has_analysis,
+)
 
 logger = logging.getLogger("agrisat.barley_detect_simple")
 
@@ -60,6 +65,14 @@ async def analyze_fields_simple(input_data: dict[str, Any]) -> dict[str, Any]:
     warnings: list[str] = []
 
     all_candidates = _traced_parcel_candidates(input_data.get("tracedParcels") or [], lat, lng, radius_m, min_area_ha)
+    # Une parcelle déjà analysée et enregistrée en base n'est jamais reclassée : ses
+    # données restent celles de la première analyse, même si elle tombe dans ce rayon.
+    all_candidates, already_analyzed = await filter_analyzed_candidates(all_candidates, lat, lng, radius_m)
+    skipped_count = len(already_analyzed)
+    if skipped_count:
+        warnings.append(
+            f"{skipped_count} parcelle(s) déjà analysée(s) ignorée(s) : leurs données enregistrées restent inchangées."
+        )
 
     def empty() -> dict[str, Any]:
         return {
@@ -67,13 +80,17 @@ async def analyze_fields_simple(input_data: dict[str, Any]) -> dict[str, Any]:
             "center": {"lat": lat, "lng": lng}, "radiusM": radius_m,
             "imageDate": None, "imageAgeDays": None, "cloudPercentage": None, "imageTimestampMs": None,
             "confidenceThreshold": confidence_threshold, "minAreaHa": min_area_ha,
-            "candidatesFound": len(all_candidates), "candidatesClassified": 0,
+            "candidatesFound": len(all_candidates) + skipped_count, "candidatesClassified": 0,
+            "candidatesSkipped": skipped_count,
             "gddCumulative": None, "gddThreshold": gdd_config["threshold"],
             "warnings": warnings,
         }
 
     if not all_candidates:
-        warnings.append("Aucune parcelle tracée dans ce rayon : laissez le traçage automatique (JECAM-VHR) finir sur la zone, puis relancez l'analyse.")
+        if skipped_count:
+            warnings.append("Toutes les parcelles de ce rayon ont déjà été analysées : rien à recalculer.")
+        else:
+            warnings.append("Aucune parcelle tracée dans ce rayon : laissez le traçage automatique (JECAM-VHR) finir sur la zone, puis relancez l'analyse.")
         return empty()
 
     async def _gdd_task() -> dict[str, Any] | None:
@@ -145,7 +162,8 @@ async def analyze_fields_simple(input_data: dict[str, Any]) -> dict[str, Any]:
         "imageTimestampMs": window["imageTimestampMs"],
         "gddCumulative": gdd["cumulative"] if gdd else None, "gddThreshold": gdd_config["threshold"],
         "confidenceThreshold": confidence_threshold, "minAreaHa": min_area_ha,
-        "candidatesFound": len(all_candidates), "candidatesClassified": len(candidates),
+        "candidatesFound": len(all_candidates) + skipped_count, "candidatesClassified": len(candidates),
+        "candidatesSkipped": skipped_count,
         "warnings": warnings,
     }
 
@@ -219,6 +237,16 @@ async def _save_simple_field_parcelle(feature: dict[str, Any]) -> None:
 
     async with async_session_maker() as session:
         existing = (await session.execute(select(Parcelle).where(Parcelle.label == label))).scalars().first()
+        if existing is not None and row_has_analysis(existing):
+            # Parcelle déjà analysée : les données enregistrées ne bougent plus.
+            logger.info("Parcelle %s déjà analysée : enregistrement ignoré.", label)
+            return
+        # La même parcelle tracée deux fois a un centroïde légèrement différent :
+        # on cherche aussi une ligne déjà analysée à proximité.
+        nearby = await find_analyzed_parcel_in_session(session, center["lat"], center["lng"])
+        if nearby is not None:
+            logger.info("Parcelle déjà analysée (%s) : enregistrement ignoré.", nearby.label)
+            return
         if existing:
             for key, value in values.items():
                 setattr(existing, key, value)

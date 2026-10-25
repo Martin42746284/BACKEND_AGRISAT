@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, update
 
 from app import cache
 from app.db import async_session_maker
@@ -106,6 +106,54 @@ async def create_parcelle(request: Request) -> JSONResponse:
 
     cache.invalidate()
     return JSONResponse(status_code=201, content=result)
+
+
+# Données de culture attachées à une parcelle : effacées quand l'utilisateur supprime la
+# culture, alors que le contour, l'identité et la localisation de la parcelle restent.
+_CULTURE_FIELDS = (
+    "culture_declared", "culture_detected", "ndvi_percentage", "ndre", "spectral_bands",
+    "confidence", "verdict", "details", "saison", "soil_type", "risk_factors",
+    "recommendations", "time_series_s1", "time_series_s2", "time_series_rain",
+    "estimated_planting_date", "estimated_harvest_date", "days_since_planting",
+    "growth_stage", "planting_confidence", "evi", "savi", "ndwi", "agro_score",
+    "hybrid_score", "cnn_prob_barley", "cnn_prob_non_barley",
+)
+# Colonnes JSONB de culture : une liste vide est plus sûre qu'un NULL pour les consommateurs.
+_CULTURE_LIST_FIELDS = {"risk_factors", "time_series_s1", "time_series_s2", "time_series_rain"}
+
+
+@router.delete("/api/parcelles/{parcelle_id}/culture")
+async def delete_parcelle_culture(parcelle_id: str) -> Response:
+    """Supprime la culture d'une parcelle **sans** supprimer la parcelle.
+
+    Le contour, la superficie et l'identité de la parcelle restent en base (donc sur
+    la carte) ; seules les données de culture sont effacées : classification, indice
+    de confiance, indices spectraux, cycle cultural, sol, risques, recommandations et
+    séries temporelles. L'opération est idempotente.
+    """
+    try:
+        parsed = DeleteParcelleParams.model_validate({"id": parcelle_id})
+    except ValidationError:
+        return JSONResponse(status_code=400, content={"error": "Identifiant invalide"})
+
+    parcelle_uuid = uuid.UUID(parsed.id)
+    async with async_session_maker() as session:
+        existing = await session.get(Parcelle, parcelle_uuid)
+        if existing is None:
+            return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
+
+        await session.execute(
+            update(Parcelle)
+            .where(Parcelle.id == parcelle_uuid)
+            .values(**{
+                field: [] if field in _CULTURE_LIST_FIELDS else None
+                for field in _CULTURE_FIELDS
+            })
+        )
+        await session.commit()
+
+    cache.invalidate()
+    return Response(status_code=204)
 
 
 @router.delete("/api/parcelles/{parcelle_id}")
