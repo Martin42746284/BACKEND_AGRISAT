@@ -144,7 +144,7 @@ def _cycle_features(frame: pd.DataFrame) -> dict[str, float]:
 
 
 def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
-    """Construit les 48 variables du modèle à partir de la série mensuelle S2.
+    """Construit les variables du modèle à partir de la série mensuelle S2.
 
     `series` : [{date: 'YYYY-MM', B2…B12, NDVI, EVI, NDRE, NDMI}, ...].
     Retourne un DataFrame (une ligne par date) ou None si la série est vide ou
@@ -206,6 +206,13 @@ def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
     stats["drop_sep_oct"] = stats["NDVI_sep"] - stats["NDVI_oct"]
     stats["ratio_oct_max"] = stats["NDVI_oct"] / (max_ndvi + 1e-4)
     stats["ramp_jun_to_aug"] = stats["NDVI_aug"] - stats["NDVI_jun"]
+    # Features cibles pour separer orge vs cultures vertes persistantes
+    stats["ndvi_oct_sep_ratio"] = stats["NDVI_oct"] / (stats["NDVI_sep"] + 1e-4)
+    stats["ndvi_oct_aug_ratio"] = stats["NDVI_oct"] / (stats["NDVI_aug"] + 1e-4)
+    stats["ndvi_sep_aug_ratio"] = stats["NDVI_sep"] / (stats["NDVI_aug"] + 1e-4)
+    stats["late_green"] = 1.0 if stats["NDVI_oct"] > stats["NDVI_sep"] + 0.05 else 0.0
+    peak_late = max(stats["NDVI_aug"], stats["NDVI_sep"])
+    stats["green_persistence_oct"] = stats["NDVI_oct"] / (peak_late + 1e-4)
     stats.update(_cycle_features(frame))
 
     row_columns = [*SPECTRAL_BANDS, *VEGETATION_INDICES, "PSRI", "MSI", "month", "day_of_year"]

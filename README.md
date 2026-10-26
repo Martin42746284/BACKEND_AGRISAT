@@ -81,6 +81,33 @@ soit 0,4-6 % de l'image au lieu de 19-53 %.
 ~20 s) pour un `--reload` immédiat : les modèles se chargent alors à la
 première requête.
 
+### Import de parcelles depuis des KML
+
+Les délimitations déjà dessinées (Google Earth, etc.) peuvent être injectées
+directement en base, sans passer par le traçage manuel ou automatique et sans
+importer les cultures :
+
+```bash
+python scripts/import_kml_parcels.py                 # rapport (dry-run), aucune écriture
+python scripts/import_kml_parcels.py --apply         # insère les nouveaux contours
+python scripts/import_kml_parcels.py --json-report rapport.json
+```
+
+Le script lit tous les `*.kml` de `kml/` (ou `--kml-dir`), ne garde que les
+polygones, répare les anneaux invalides et calcule centre/surface. Il est
+**additif et idempotent** :
+
+- aucune parcelle existante n'est modifiée ou supprimée ;
+- un contour déjà présent en base (IoU ≥ 0,60) est ignoré ;
+- les lignes « Tracé automatique supprimé » ne bloquent pas un contour KML
+  explicite (elles ne concernent que les tracés automatiques) ;
+- deux contours quasi identiques dans les KML (IoU ≥ 0,80) sont fusionnés ;
+- les lignes créées portent `data_source = "Import KML"`, des libellés neutres
+  (`Parcelle KML 001`, …) et tous les champs de culture/analyse restent `NULL`.
+
+Les seuils sont réglables avec `--existing-iou` et `--import-iou`. Une nouvelle
+exécution après ajout de fichiers ne réinsère pas les contours déjà importés.
+
 ## Prérequis
 
 - [Python](https://www.python.org/) 3.11 ou supérieur
@@ -258,6 +285,8 @@ AGRISAT-BACKEND/
 │   ├── routes/                   # Endpoints HTTP
 │   └── services/                 # Logique métier (analyse GEE, watershed, zonage, ...)
 ├── migrations/                   # Migrations Alembic
+├── kml/                         # Fichiers KML sources (import de délimitations)
+├── scripts/                     # Scripts d'exploitation (modèles, import KML)
 ├── pyproject.toml                # Dépendances Python
 ├── alembic.ini
 └── .env.example                  # Modèle des variables d'environnement

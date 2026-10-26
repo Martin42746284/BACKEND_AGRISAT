@@ -84,8 +84,8 @@ def _validate(joblib_path: Path, source_dir: Path) -> list[str]:
     features = [str(name) for name in bundle.get("features") or []]
     if type(model).__name__ != "RandomForestClassifier":
         errors.append(f"estimateur {type(model).__name__} au lieu de RandomForestClassifier")
-    if len(features) != 48:
-        errors.append(f"{len(features)} variables au lieu de 48")
+    if len(features) not in (48, 53):
+        errors.append(f"{len(features)} variables au lieu de 48 ou 53")
 
     expected = _source_features(source_dir)
     if expected is not None and expected != features:

@@ -1,99 +1,99 @@
 {
-  "generated_at": "2026-10-19 21:59:29",
+  "generated_at": "2026-10-25 20:18:38",
   "objectif": {
     "rappel_cible_parcelle": 0.85,
     "niveau": "parcelle (proba moyenne des dates)"
   },
   "evaluation": "GroupKFold(5) par parcelle, predictions hors-echantillon",
-  "auc_roc_observation": 0.822947,
+  "auc_roc_observation": 0.823137,
   "validation_imbriquee": {
     "plis": [
       {
         "pli": 0,
-        "seuil_choisi_hors_pli": 0.3322,
-        "seuil": 0.3322,
-        "n_parcelles_orge": 29,
-        "detectees": 42,
-        "vraies_orge_detectees": 23,
-        "orge_manquees": 6,
-        "fausses_alarmes": 19,
-        "rappel_orge": 0.793103,
-        "precision_orge": 0.547619
+        "seuil_choisi_hors_pli": 0.2855,
+        "seuil": 0.2855,
+        "n_parcelles_orge": 72,
+        "detectees": 89,
+        "vraies_orge_detectees": 57,
+        "orge_manquees": 15,
+        "fausses_alarmes": 32,
+        "rappel_orge": 0.791667,
+        "precision_orge": 0.640449
       },
       {
         "pli": 1,
-        "seuil_choisi_hors_pli": 0.4004,
-        "seuil": 0.4004,
-        "n_parcelles_orge": 46,
-        "detectees": 40,
-        "vraies_orge_detectees": 30,
-        "orge_manquees": 16,
-        "fausses_alarmes": 10,
-        "rappel_orge": 0.652174,
-        "precision_orge": 0.75
+        "seuil_choisi_hors_pli": 0.2417,
+        "seuil": 0.2417,
+        "n_parcelles_orge": 65,
+        "detectees": 99,
+        "vraies_orge_detectees": 56,
+        "orge_manquees": 9,
+        "fausses_alarmes": 43,
+        "rappel_orge": 0.861538,
+        "precision_orge": 0.565657
       },
       {
         "pli": 2,
-        "seuil_choisi_hors_pli": 0.2313,
-        "seuil": 0.2313,
-        "n_parcelles_orge": 29,
-        "detectees": 53,
-        "vraies_orge_detectees": 27,
-        "orge_manquees": 2,
-        "fausses_alarmes": 26,
-        "rappel_orge": 0.931034,
-        "precision_orge": 0.509434
+        "seuil_choisi_hors_pli": 0.2417,
+        "seuil": 0.2417,
+        "n_parcelles_orge": 50,
+        "detectees": 89,
+        "vraies_orge_detectees": 44,
+        "orge_manquees": 6,
+        "fausses_alarmes": 45,
+        "rappel_orge": 0.88,
+        "precision_orge": 0.494382
       },
       {
         "pli": 3,
-        "seuil_choisi_hors_pli": 0.2679,
-        "seuil": 0.2679,
-        "n_parcelles_orge": 38,
-        "detectees": 49,
-        "vraies_orge_detectees": 34,
-        "orge_manquees": 4,
-        "fausses_alarmes": 15,
-        "rappel_orge": 0.894737,
-        "precision_orge": 0.693878
+        "seuil_choisi_hors_pli": 0.2326,
+        "seuil": 0.2326,
+        "n_parcelles_orge": 72,
+        "detectees": 100,
+        "vraies_orge_detectees": 63,
+        "orge_manquees": 9,
+        "fausses_alarmes": 37,
+        "rappel_orge": 0.875,
+        "precision_orge": 0.63
       },
       {
         "pli": 4,
-        "seuil_choisi_hors_pli": 0.2148,
-        "seuil": 0.2148,
-        "n_parcelles_orge": 39,
-        "detectees": 55,
-        "vraies_orge_detectees": 37,
-        "orge_manquees": 2,
-        "fausses_alarmes": 18,
-        "rappel_orge": 0.948718,
-        "precision_orge": 0.672727
+        "seuil_choisi_hors_pli": 0.2465,
+        "seuil": 0.2465,
+        "n_parcelles_orge": 59,
+        "detectees": 93,
+        "vraies_orge_detectees": 50,
+        "orge_manquees": 9,
+        "fausses_alarmes": 43,
+        "rappel_orge": 0.847458,
+        "precision_orge": 0.537634
       }
     ],
-    "rappel_orge": 0.834254,
-    "precision_orge": 0.631799
+    "rappel_orge": 0.849057,
+    "precision_orge": 0.574468
   },
-  "seuil_retenu": 0.3268,
+  "seuil_retenu": 0.2465,
   "point_de_fonctionnement": {
-    "seuil": 0.3268,
-    "n_parcelles_orge": 181,
-    "detectees": 235,
-    "vraies_orge_detectees": 154,
-    "orge_manquees": 27,
-    "fausses_alarmes": 81,
-    "rappel_orge": 0.850829,
-    "precision_orge": 0.655319
+    "seuil": 0.2465,
+    "n_parcelles_orge": 318,
+    "detectees": 470,
+    "vraies_orge_detectees": 271,
+    "orge_manquees": 47,
+    "fausses_alarmes": 199,
+    "rappel_orge": 0.852201,
+    "precision_orge": 0.576596
   },
-  "seuil_precedent": 0.35999999999999993,
+  "seuil_precedent": 0.33999999999999997,
   "point_de_fonctionnement_precedent": {
-    "seuil": 0.36,
-    "n_parcelles_orge": 181,
-    "detectees": 223,
-    "vraies_orge_detectees": 150,
-    "orge_manquees": 31,
-    "fausses_alarmes": 73,
-    "rappel_orge": 0.828729,
-    "precision_orge": 0.672646
+    "seuil": 0.34,
+    "n_parcelles_orge": 318,
+    "detectees": 400,
+    "vraies_orge_detectees": 256,
+    "orge_manquees": 62,
+    "fausses_alarmes": 144,
+    "rappel_orge": 0.805031,
+    "precision_orge": 0.64
   },
   "applique": true,
-  "sauvegarde": "orge_rf_backup_20261019_215929.joblib"
+  "sauvegarde": "orge_rf_backup_20261025_201838.joblib"
 }
