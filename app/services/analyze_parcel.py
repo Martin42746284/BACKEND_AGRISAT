@@ -51,7 +51,10 @@ HF_MODEL_URL = settings.hf_model_url or "https://andritinatonny-agrisat.hf.space
 GOOGLE_MAPS_API_KEY = settings.google_maps_api_key
 
 MIN_BARLEY_CONFIDENCE = 70
-TIME_SERIES_CONCURRENCY = 1
+# Les appels GEE sont des attentes réseau : menés en série (1), ils allongeaient chaque
+# parcelle de plusieurs dizaines de secondes. Trois en parallèle, et la série mensuelle
+# S2 du classifieur RF tourne en plus en parallèle de la série radar (voir `analyze_parcel`).
+TIME_SERIES_CONCURRENCY = 3
 GEE_COMPUTE_TIMEOUT_S = 60.0
 EXTERNAL_REQUEST_TIMEOUT_S = 30.0
 RETRY_DELAYS_S = (0.25, 1.0)
@@ -755,17 +758,14 @@ async def map_with_concurrency(items: list[T], concurrency: int, mapper: Callabl
     return results  # type: ignore[return-value]
 
 
-async def _fetch_time_series(access_token: str, project_id: str, polygon: Any) -> dict[str, list[dict[str, Any]]]:
-    months = get_monthly_ranges(6)
+async def _fetch_s1_time_series(access_token: str, project_id: str, polygon: Any) -> list[dict[str, Any]]:
+    """Série radar S1 (6 mois) de la parcelle, pour l'affichage.
 
-    async def s2_mapper(m: dict[str, str]) -> dict[str, Any]:
-        result = await call_gee_compute(access_token, project_id, _build_s2_expression(m["start"], m["end"], polygon))
-        ndvi = None
-        if result:
-            bands = _parse_s2_bands(result)
-            if bands["nir"] is not None and bands["red"] is not None and (bands["nir"] + bands["red"]) != 0:
-                ndvi = js_round(((bands["nir"] - bands["red"]) / (bands["nir"] + bands["red"])) * 1000) / 10
-        return {"date": m["label"], "ndvi": ndvi, "cloud_cover": None}
+    La série S2 n'est plus calculée ici : `fetch_s2_monthly_series` (12 mois, requise
+    par le classifieur RF) tourne en parallèle et ses 6 derniers mois alimentent
+    l'affichage via `_s2_display_series` — 6 appels GEE par parcelle économisés.
+    """
+    months = get_monthly_ranges(6)
 
     async def s1_mapper(m: dict[str, str]) -> dict[str, Any]:
         result = await call_gee_compute(access_token, project_id, _build_s1_expression(m["start"], m["end"], polygon))
@@ -778,9 +778,24 @@ async def _fetch_time_series(access_token: str, project_id: str, polygon: Any) -
                 vh = js_round(parsed["vh"] * 100) / 100
         return {"date": m["label"], "vv": vv, "vh": vh}
 
-    s2 = await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s2_mapper)
-    s1 = await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s1_mapper)
-    return {"s2": s2, "s1": s1}
+    return await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s1_mapper)
+
+
+def _s2_display_series(monthly_rows: list[dict[str, Any]], months: int = 6) -> list[dict[str, Any]]:
+    """Série S2 d'affichage (6 derniers mois) dérivée de la série mensuelle du RF.
+
+    Le NDVI est ramené en pourcentage à une décimale comme le faisait l'ancien
+    `s2_mapper` (`js_round(ratio * 1000) / 10`), pour ne rien changer aux graphes.
+    """
+    rows: list[dict[str, Any]] = []
+    for row in monthly_rows[-months:]:
+        ndvi = row.get("NDVI")
+        rows.append({
+            "date": row.get("date"),
+            "ndvi": js_round(ndvi * 1000) / 10 if isinstance(ndvi, (int, float)) and math.isfinite(ndvi) else None,
+            "cloud_cover": None,
+        })
+    return rows
 
 
 async def _fetch_precipitation_time_series(lat: float, lng: float, months: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -1216,20 +1231,31 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             except Exception as error:  # noqa: BLE001
                 warnings.append(f"GEE indisponible : {_error_message(error)}")
 
+        # Série mensuelle S2 (12 mois) lancée avec le reste : elle sert à la fois au
+        # classifieur RF et à la série d'affichage (ses 6 derniers mois).
+        from app.services.s2_time_series import fetch_s2_monthly_series
+
         snapshot_task = _fetch_current_snapshot(access_token, lat, lng, project_id, parcel_polygon) if access_token else _resolved(None)
-        time_series_task = _fetch_time_series(access_token, project_id, parcel_polygon) if access_token else _resolved(None)
+        s1_task = _fetch_s1_time_series(access_token, project_id, parcel_polygon) if access_token else _resolved(None)
+        s2_monthly_task = fetch_s2_monthly_series(access_token, project_id, parcel_polygon) if access_token else _resolved([])
         rain_task = _fetch_precipitation_time_series(lat, lng, get_monthly_ranges(6))
 
-        snapshot_result, time_series_result, rain_result = await asyncio.gather(snapshot_task, time_series_task, rain_task, return_exceptions=True)
+        snapshot_result, s1_result, s2_monthly_result, rain_result = await asyncio.gather(
+            snapshot_task, s1_task, s2_monthly_task, rain_task, return_exceptions=True,
+        )
 
         sat_data = snapshot_result if snapshot_result and not isinstance(snapshot_result, BaseException) else _create_empty_satellite_data()
-        time_series = time_series_result if time_series_result and not isinstance(time_series_result, BaseException) else {"s2": [], "s1": []}
+        s2_monthly: list[dict[str, Any]] = s2_monthly_result if isinstance(s2_monthly_result, list) and s2_monthly_result else []
+        s1_rows: list[dict[str, Any]] = s1_result if isinstance(s1_result, list) else []
+        time_series = {"s2": _s2_display_series(s2_monthly), "s1": s1_rows}
         time_series_rain = rain_result if not isinstance(rain_result, BaseException) else []
 
         if isinstance(snapshot_result, BaseException):
             warnings.append(f"Sentinel-2 indisponible : {_error_message(snapshot_result)}")
-        if isinstance(time_series_result, BaseException):
-            warnings.append(f"Séries temporelles indisponibles : {_error_message(time_series_result)}")
+        if isinstance(s1_result, BaseException):
+            warnings.append(f"Séries radar indisponibles (S1) : {_error_message(s1_result)}")
+        if isinstance(s2_monthly_result, BaseException):
+            warnings.append(f"Série Sentinel-2 mensuelle indisponible (RF) : {_error_message(s2_monthly_result)}")
         if isinstance(rain_result, BaseException):
             warnings.append(f"Précipitations indisponibles : {_error_message(rain_result)}")
 
@@ -1243,24 +1269,17 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         agro = compute_agro_score(sat_data, planting, time_series)
         hf_result = await _call_hf_model_safely(satellite_image, warnings) if satellite_image else None
 
-        from app.services.s2_time_series import fetch_s2_monthly_series
-
         # Verdict prioritaire : RF saisonnier (modèle entraîné hors-ligne, série S2 12 mois).
         # Replis dans l'ordre : classifieur logistique Sentinel-2 calibré terrain, puis
         # l'ancienne fusion CNN (modèle HF andritonny, conservé) + score agro.
-        s2_monthly: list[dict[str, Any]] = []
         rf = None
-        if access_token:
+        if s2_monthly:
             try:
-                s2_monthly = await fetch_s2_monthly_series(access_token, project_id, parcel_polygon)
-            except Exception as error:  # noqa: BLE001
-                warnings.append(f"Série Sentinel-2 mensuelle indisponible (RF) : {_error_message(error)}")
-            try:
-                rf = classify_barley_rf(s2_monthly) if s2_monthly else None
+                rf = classify_barley_rf(s2_monthly)
             except Exception as error:  # noqa: BLE001
                 logger.warning("Classifieur RF orge en échec : %s", error)
                 rf = None
-            if s2_monthly and rf is None:
+            if rf is None:
                 warnings.append("Classifieur RF indisponible (modèle absent ou série trop courte).")
 
         s2 = classify_barley_s2(sat_data)

@@ -23,12 +23,22 @@ MAX_TRACED_PARCELS = 2_000
 
 
 class TracedParcel(BaseModel):
-    """Parcelle déjà tracée à l'écran (modèle JECAM-VHR), envoyée par le frontend pour être classée."""
+    """Parcelle à classer : contour tracé à l'écran (JECAM-VHR) ou ligne déjà
+    enregistrée dans `parcelles` (import KML, tracé manuel).
+
+    `id` est l'identifiant de la ligne en base : quand il est fourni, l'analyse
+    met cette ligne à jour au lieu de créer un doublon au même endroit. Il reste
+    absent pour les contours qui n'existent qu'à l'écran.
+    """
 
     coordinates: list[Point] = Field(min_length=3, max_length=5_000)
+    id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"coordinates": [point.model_dump() for point in self.coordinates]}
+        return {
+            "id": self.id,
+            "coordinates": [point.model_dump() for point in self.coordinates],
+        }
 
 
 class AnalyzeSimpleRequest(BaseModel):

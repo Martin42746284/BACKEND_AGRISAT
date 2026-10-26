@@ -78,7 +78,6 @@ MAX_CANDIDATES = 48
 MAX_SATELLITE_CELLS = 36
 ANALYSIS_CONCURRENCY = 4
 ANALYSIS_TIME_BUDGET_S = 60.0
-TRACED_ANALYSIS_TIME_BUDGET_S = 180.0
 
 GeeValue = dict[str, Any]
 
@@ -312,10 +311,28 @@ async def _discover_agricultural_parcels_from_watershed(lat: float, lng: float, 
 TRACED_PARCEL_SOURCE = "jecam-vhr"
 
 
+def _stored_parcel_id(value: Any) -> str | None:
+    """Identifiant UUID d'une ligne `parcelles`, ou None si la valeur n'en est pas un.
+
+    Les contours tracés à l'écran portent un identifiant de session (`tile-…VHR-…`) :
+    seules les parcelles déjà enregistrées en base (import KML, tracé manuel) ont un UUID.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 def _traced_parcel_candidates(traced_parcels: list[dict[str, Any]], lat: float, lng: float, radius_km: float) -> list[dict[str, Any]]:
-    """Parcelles tracées envoyées par le frontend qui recoupent le cercle de recherche, de la
-    plus proche à la plus éloignée. Pas de découpage au rayon : chaque parcelle est classée
-    entière (orge ou non)."""
+    """Parcelles envoyées par le frontend dont le centre tombe dans le cercle de recherche,
+    de la plus proche à la plus éloignée. Pas de découpage au rayon : chaque parcelle est
+    classée entière (orge ou non), mais une parcelle seulement à cheval sur le rayon n'est
+    pas analysée.
+
+    Une parcelle déjà enregistrée en base garde son identifiant : l'analyse complète sa
+    ligne (import KML, tracé manuel) au lieu d'ajouter une parcelle en double."""
     center = {"lat": lat, "lng": lng}
     candidates: list[dict[str, Any]] = []
     for parcel in traced_parcels:
@@ -324,7 +341,8 @@ def _traced_parcel_candidates(traced_parcels: list[dict[str, Any]], lat: float, 
             continue
         parcel_center = _polygon_center(coordinates)
         candidate = {
-            "id": f"{TRACED_PARCEL_SOURCE}-{parcel_center['lat']:.6f}-{parcel_center['lng']:.6f}",
+            "id": _stored_parcel_id(parcel.get("id"))
+            or f"{TRACED_PARCEL_SOURCE}-{parcel_center['lat']:.6f}-{parcel_center['lng']:.6f}",
             "coordinates": coordinates,
             "center": parcel_center,
             "tags": {"source": TRACED_PARCEL_SOURCE},
@@ -455,16 +473,6 @@ def _point_in_polygon(point: dict[str, float], polygon: list[dict[str, float]]) 
             inside = not inside
         j = i
     return inside
-
-
-def _distance_to_segment(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float:
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    length_squared = dx * dx + dy * dy
-    if length_squared == 0:
-        return math.hypot(point[0] - start[0], point[1] - start[1])
-    ratio = max(0.0, min(1.0, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_squared))
-    return math.hypot(point[0] - (start[0] + ratio * dx), point[1] - (start[1] + ratio * dy))
 
 
 def _polygon_center(points: list[dict[str, float]]) -> dict[str, float]:
@@ -635,19 +643,16 @@ def _clip_polygon_to_radius(polygon: list[dict[str, float]], center: dict[str, f
 
 
 def _is_parcel_within_radius(candidate: dict[str, Any], center: dict[str, float], radius_km: float) -> bool:
-    if _point_in_polygon(center, candidate["coordinates"]):
-        return True
-    longitude_scale = math.cos((center["lat"] * math.pi) / 180)
+    """Parcelle *située dans* le rayon : son centre tombe dans le disque.
 
-    def to_km(point: dict[str, float]) -> tuple[float, float]:
-        return ((point["lng"] - center["lng"]) * 111.32 * longitude_scale, (point["lat"] - center["lat"]) * 110.574)
-
-    origin = (0.0, 0.0)
-    points = [to_km(p) for p in candidate["coordinates"]]
-    if any(math.hypot(p[0], p[1]) <= radius_km for p in points):
-        return True
-    n = len(points)
-    return any(_distance_to_segment(origin, points[i], points[(i + 1) % n]) <= radius_km for i in range(n))
+    L'ancien test retenait toute parcelle qui recoupait le cercle (un sommet ou
+    un côté à l'intérieur) : des parcelles dont le centre est hors du rayon
+    demandé étaient donc analysées et enregistrées. Désormais seule une parcelle
+    centrée dans le rayon est retenue ; elle reste classée entière (aucun
+    découpage au cercle).
+    """
+    parcel_center = candidate.get("center") or _polygon_center(candidate["coordinates"])
+    return _distance_between_points(center, parcel_center) <= radius_km
 
 
 # ── Déduplication / couverture ──
@@ -754,7 +759,11 @@ _as_string = as_string
 _as_string_array = as_string_array
 
 
-async def _analyze_candidate(candidate: dict[str, Any], config: dict[str, float]) -> dict[str, Any]:
+async def _analyze_candidate(
+    candidate: dict[str, Any],
+    config: dict[str, float],
+    shared_gdd: dict[str, Any],
+) -> dict[str, Any]:
     zoom = 15
     if candidate["tags"].get("source") == TRACED_PARCEL_SOURCE:
         # Parcelles tracées souvent sous 1 ha : on cadre l'image envoyée au CNN sur la parcelle.
@@ -769,12 +778,10 @@ async def _analyze_candidate(candidate: dict[str, Any], config: dict[str, float]
     if status != 200 or not isinstance(data, dict):
         return {**candidate, "analysis": None, "analysis_error": "Analyse satellite indisponible."}
 
-    gdd: dict[str, Any] | None = None
-    gdd_error: str | None = None
-    try:
-        gdd = await fetch_growing_degree_days(candidate["center"]["lat"], candidate["center"]["lng"], config)
-    except Exception as error:  # noqa: BLE001
-        gdd_error = str(error) or "Données degrés-jours indisponibles."
+    # Degrés-jours calculés une seule fois pour toute la requête (même point, mêmes
+    # paramètres) : les redemander par parcelle coûtait un appel Open-Meteo par parcelle.
+    gdd: dict[str, Any] | None = shared_gdd.get("value")
+    gdd_error: str | None = shared_gdd.get("error")
 
     model_detects_barley = data.get("is_barley") is True
     barley_presence = ("confirmed" if gdd and gdd.get("detected") is True else "probable") if model_detects_barley else "none"
@@ -868,15 +875,22 @@ async def _save_automatic_analysis(candidate: dict[str, Any], analysis: dict[str
             return
 
         # La même parcelle peut être redécouverte sous un autre identifiant (contour
-        # retracé) : on cherche aussi une ligne déjà analysée à proximité.
-        nearby = await find_analyzed_parcel_in_session(session, values["center_lat"], values["center_lng"])
-        if nearby is not None:
-            logger.info("Parcelle déjà analysée (%s) : enregistrement ignoré.", nearby.label)
-            return
+        # retracé) : on cherche aussi une ligne déjà analysée à proximité. La recherche
+        # est inutile quand l'identifiant de la ligne visée est connu (import KML,
+        # tracé manuel) : c'est cette ligne-là qui doit recevoir le résultat.
+        if existing is None:
+            nearby = await find_analyzed_parcel_in_session(session, values["center_lat"], values["center_lng"])
+            if nearby is not None:
+                logger.info("Parcelle déjà analysée (%s) : enregistrement ignoré.", nearby.label)
+                return
 
         if existing:
             values["label"] = existing.label
             for key, value in values.items():
+                # Une analyse automatique ne connaît pas la surface (calculée côté carte) :
+                # elle ne doit pas effacer celle d'une parcelle déjà enregistrée.
+                if key == "surface_ha" and value is None and existing.surface_ha is not None:
+                    continue
                 setattr(existing, key, value)
         else:
             session.add(Parcelle(**values))
@@ -939,8 +953,13 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-async def _map_with_concurrency_deadline(items: list[T], concurrency: int, deadline_s: float, mapper: Callable[[T], Awaitable[R]]) -> dict[int, R]:
-    deadline_at = time.monotonic() + deadline_s
+async def _map_with_concurrency_deadline(items: list[T], concurrency: int, deadline_s: float | None, mapper: Callable[[T], Awaitable[R]]) -> dict[int, R]:
+    """Traite tous les éléments avec au plus `concurrency` analyses simultanées.
+
+    `deadline_s` à `None` désactive le budget de temps : plus aucune parcelle n'est
+    écartée, l'appel ne rend la main qu'une fois la dernière traitée.
+    """
+    deadline_at = time.monotonic() + deadline_s if deadline_s is not None else None
     results: dict[int, R] = {}
     cursor = 0
     cursor_lock = asyncio.Lock()
@@ -949,7 +968,7 @@ async def _map_with_concurrency_deadline(items: list[T], concurrency: int, deadl
         nonlocal cursor
         while True:
             async with cursor_lock:
-                if time.monotonic() >= deadline_at:
+                if deadline_at is not None and time.monotonic() >= deadline_at:
                     return
                 if cursor >= len(items):
                     return
@@ -981,18 +1000,31 @@ async def detect_automatic_parcels(request: dict[str, Any]) -> dict[str, Any]:
         candidates, already_analyzed = await filter_analyzed_candidates(candidates, lat, lng, radius_km * 1000)
         skipped_count = len(already_analyzed)
         config = {"baseTemperature": base_temperature, "threshold": threshold, "periodDays": period_days}
-        analyzed_candidates = candidates[:MAX_CANDIDATES]
+        # Parcelles tracées dans le rayon : toutes sont analysées, sans plafond ni budget
+        # de temps (elles arrivent par lots bornés côté client). La limite de candidats
+        # ne concerne que la découverte automatique, qui peut renvoyer beaucoup de bruit.
+        analyzed_candidates = candidates if traced_candidates else candidates[:MAX_CANDIDATES]
         watershed_fallback = any(c["tags"].get("source") == "gee-watershed-segmentation" for c in analyzed_candidates)
         satellite_window_fallback = (
             not watershed_fallback
             and any((c["tags"].get("source") or "").startswith("satellite-search") for c in analyzed_candidates)
         )
 
-        # Parcelles tracées : petites et nombreuses, ~25-30 s d'analyse chacune — le budget de
-        # 60 s n'en laissait passer que 8 environ.
-        time_budget_s = TRACED_ANALYSIS_TIME_BUDGET_S if traced_candidates else ANALYSIS_TIME_BUDGET_S
+        # Les parcelles tracées prennent ~25-30 s chacune : aucun budget de temps, sinon
+        # les dernières du rayon restaient non analysées. Le budget ne s'applique qu'à
+        # la découverte automatique, où le nombre de candidats n'est pas maîtrisé.
+        # Un seul appel météo pour tout le rayon : la valeur est partagée par toutes
+        # les analyses (l'ancien code en faisait un par parcelle).
+        shared_gdd: dict[str, Any] = {"value": None, "error": None}
+        if analyzed_candidates:
+            try:
+                shared_gdd["value"] = await fetch_growing_degree_days(lat, lng, config)
+            except Exception as error:  # noqa: BLE001 — l'analyse continue sans degrés-jours
+                shared_gdd["error"] = str(error) or "Données degrés-jours indisponibles."
+
+        time_budget_s = None if traced_candidates else ANALYSIS_TIME_BUDGET_S
         analyzed_results = await _map_with_concurrency_deadline(
-            analyzed_candidates, ANALYSIS_CONCURRENCY, time_budget_s, lambda candidate: _analyze_candidate(candidate, config)
+            analyzed_candidates, ANALYSIS_CONCURRENCY, time_budget_s, lambda candidate: _analyze_candidate(candidate, config, shared_gdd)
         )
         analyzed_parcels = [
             analyzed_results.get(
@@ -1010,8 +1042,6 @@ async def detect_automatic_parcels(request: dict[str, Any]) -> dict[str, Any]:
 
         if traced_candidates:
             notice = f"{len(traced_candidates)} parcelle(s) déjà tracée(s) (JECAM-VHR) dans le rayon, classée(s) entière(s) : orge ou non."
-            if len(traced_candidates) > MAX_CANDIDATES:
-                notice += f" Seules les {MAX_CANDIDATES} plus proches du point sont analysées."
         elif watershed_fallback:
             notice = "Aucun contour vectoriel référencé : les limites de parcelles ont été détectées automatiquement par watershed + analyse NDVI multi-temporelle (Google Earth Engine, sans modèle IA)."
         elif satellite_window_fallback:

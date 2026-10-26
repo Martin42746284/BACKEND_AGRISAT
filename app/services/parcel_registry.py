@@ -233,9 +233,18 @@ async def filter_analyzed_candidates(
     if not rows:
         return candidates, []
 
+    rows_by_id = {str(row.id): row for row in rows}
     kept: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for candidate in candidates:
+        # Parcelle déjà enregistrée et clairement identifiée (import KML, tracé manuel) :
+        # seule sa propre ligne fait foi. La comparaison de proximité ne doit pas lui
+        # opposer le résultat d'une parcelle voisine, sans quoi elle ne serait jamais
+        # analysée alors que sa ligne en base est vide.
+        stored = rows_by_id.get(str(candidate.get("id") or ""))
+        if stored is not None:
+            (skipped if row_has_analysis(stored) else kept).append(candidate)
+            continue
         center = candidate.get("center") or {}
         candidate_lat, candidate_lng = center.get("lat"), center.get("lng")
         if not isinstance(candidate_lat, (int, float)) or not isinstance(candidate_lng, (int, float)):
