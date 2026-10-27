@@ -176,7 +176,7 @@ réseau lent, la requête peut dépasser le délai imparti et l'API répond alor
 **503** au lieu de servir les parcelles. Le délai est réglable :
 
 ```bash
-PARCELS_QUERY_TIMEOUT_S=90   # défaut : 20 (suffisant pour une base proche)
+PARCELS_QUERY_TIMEOUT_S=60   # défaut : 60 (base distante type Neon, lien lent)
 ```
 
 ## Configuration

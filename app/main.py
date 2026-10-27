@@ -11,11 +11,12 @@ from app import cache
 from app.config import settings
 from app.db import engine
 from app.errors import register_error_handlers
+from app.logging_setup import configure_logging
 from app.services.barley_rf_classifier import load_model as load_barley_model
 from app.services.field_segmentation import warmup as warmup_field_segmentation
 from app.services.vhr_launcher import ensure_vhr_service
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger("agrisat")
 server_logger = logging.getLogger("uvicorn.error")
 
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
                 await connection.execute(text("SELECT 1"))
     except TimeoutError:
         server_logger.error("Connexion à la base de données échouée : délai dépassé après 20 secondes.")
-    except SQLAlchemyError as error:
+    except (SQLAlchemyError, OSError) as error:
         server_logger.error("Connexion à la base de données échouée : %s", error)
     else:
         server_logger.info("Connexion à la base de données établie.")

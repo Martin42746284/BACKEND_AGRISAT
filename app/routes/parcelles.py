@@ -50,7 +50,11 @@ async def list_parcelles() -> JSONResponse:
         rows = await cache.load_parcelles()
         return JSONResponse(content=[_serialize(r) for r in rows])
     except Exception as error:  # noqa: BLE001
-        logger.error("parcelles: read failed: %s", error)
+        logger.error(
+            "parcelles: read failed (%s): %s",
+            type(error).__name__,
+            cache.describe_error(error),
+        )
         return JSONResponse(status_code=503, content={"error": "Les parcelles sont temporairement indisponibles."})
 
 

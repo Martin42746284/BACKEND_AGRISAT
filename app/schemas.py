@@ -188,6 +188,41 @@ class AnalyzeParcelRequest(BaseModel):
     _v = field_validator("lat", "lng")(_finite)
 
 
+class GeminiViewportBounds(BaseModel):
+    south: float = Field(ge=-90, le=90)
+    west: float = Field(ge=-180, le=180)
+    north: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+
+    _v = field_validator("south", "west", "north", "east")(_finite)
+
+
+class GeminiParcelsRequest(BaseModel):
+    """Capture satellite (zone écran visible ou rayon autour d'un point) et détection Gemini.
+
+    Si `viewport_width` et `viewport_height` (ou `bounds`) sont fournis, la capture
+    couvre exactement l'intégralité du champ de vision visible à l'écran.
+    Sinon, `span_m` et `tile_span_m` définissent la zone capturée autour du centre.
+    """
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    span_m: float | None = Field(default=None, ge=10.0, le=10000.0)
+    tile_span_m: float | None = Field(default=None, ge=10.0, le=10000.0)
+    zoom: int | None = Field(default=None, ge=10, le=22)
+    persist: bool = True
+    viewport_width: int | None = Field(default=None, ge=100, le=4000)
+    viewport_height: int | None = Field(default=None, ge=100, le=4000)
+    bounds: GeminiViewportBounds | None = None
+
+    _v = field_validator("latitude", "longitude")(_finite)
+
+    @field_validator("span_m", "tile_span_m")
+    @classmethod
+    def _finite_span(cls, value: float | None) -> float | None:
+        return None if value is None else _finite(value)
+
+
 class DeleteParcelleParams(BaseModel):
     id: str
 

@@ -6,6 +6,7 @@ from app.routes import (
     audit,
     detect_parcels,
     field_segmentation,
+    gemini_parcels,
     health,
     modeles,
     parcelles,
@@ -30,4 +31,5 @@ api_router.include_router(sentinel_tiles.router)
 api_router.include_router(field_segmentation.router)
 api_router.include_router(zone_crops.router)
 api_router.include_router(zone_parcels.router)
+api_router.include_router(gemini_parcels.router)
 api_router.include_router(audit.router)

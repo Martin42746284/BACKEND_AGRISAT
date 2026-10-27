@@ -38,6 +38,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
 from app.config import settings
+from app.logging_setup import redact_api_keys
 from app.services.barley_rf_classifier import classify as classify_barley_rf
 from app.services.barley_s2_classifier import classify as classify_barley_s2
 from app.services.barley_rf_classifier import load_model as load_barley_rf
@@ -94,7 +95,7 @@ async def fetch_with_retry(method: str, url: str, *, timeout_s: float, **kwargs:
 
 
 def _error_message(error: BaseException) -> str:
-    return str(error) or "erreur réseau inconnue"
+    return redact_api_keys(str(error)) or "erreur réseau inconnue"
 
 
 # ── GEE Auth ──
@@ -419,7 +420,17 @@ async def capture_parcel_image(lat: float, lng: float, zoom: float, polygon: Any
         path = "|".join(f"{p['lat']},{p['lng']}" for p in parcel_polygon)
         params["path"] = f"color:0xfbbf24ff|weight:2|{path}"
 
-    resp = await fetch_with_retry("GET", "https://maps.googleapis.com/maps/api/staticmap", params=params, timeout_s=EXTERNAL_REQUEST_TIMEOUT_S)
+    try:
+        resp = await fetch_with_retry(
+            "GET",
+            "https://maps.googleapis.com/maps/api/staticmap",
+            params=params,
+            timeout_s=EXTERNAL_REQUEST_TIMEOUT_S,
+        )
+    except Exception as error:  # noqa: BLE001 — ne jamais exposer l'URL (elle contient la clé)
+        raise RuntimeError(
+            f"Capture satellite injoignable ({type(error).__name__})."
+        ) from error
     if resp.status_code >= 400:
         raise RuntimeError(f"Google Maps Static API error: {resp.status_code}")
     return base64.b64encode(resp.content).decode("ascii")
@@ -473,7 +484,7 @@ async def _call_hf_model_safely(image_base64: str, warnings: list[str]) -> HFMod
         return await call_hf_model(image_base64)
     except Exception as error:  # noqa: BLE001
         warnings.append(f"Modèle Hugging Face indisponible : {_error_message(error)}")
-        logger.warning("[CLASSIFICATION] Modèle indisponible : %s", error)
+        logger.warning("[CLASSIFICATION] Modèle indisponible : %s", _error_message(error))
         return None
 
 
@@ -1415,5 +1426,5 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         }
         return 200, response
     except Exception as error:  # noqa: BLE001
-        logger.error("analyze-parcel error: %s", error, exc_info=error)
-        return 500, {"error": str(error) or "Unknown error"}
+        logger.error("analyze-parcel error: %s", redact_api_keys(str(error)), exc_info=error)
+        return 500, {"error": redact_api_keys(str(error)) or "Unknown error"}

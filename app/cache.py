@@ -1,6 +1,6 @@
 """Port 1:1 du cache parcelles de src/server.ts (lignes ~96-209) : TTL 30s avec
 stale-while-revalidate (revalidation en arrière-plan) et timeout de requête DB
-configurable (PARCELLES_QUERY_TIMEOUT_S, 20 s par défaut).
+configurable (PARCELLES_QUERY_TIMEOUT_S, 60 s par défaut).
 
 La requête charge les 37 colonnes de `parcelles`, dont des JSONB volumineux
 (time_series_s1/s2, coordinates). Sur un lien lent vers une base distante, elle
