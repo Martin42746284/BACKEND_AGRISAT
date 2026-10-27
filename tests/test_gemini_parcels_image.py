@@ -17,8 +17,11 @@ import numpy as np  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 
 from app.services.gemini_parcels_image import (  # noqa: E402
+    DILATE_MIN_PX,
+    _dilate_lines,
     _drop_blobs,
     _red_mask,
+    _separating_mask,
     framing_warning,
     parcel_rings_from_red_lines,
 )
@@ -72,10 +75,16 @@ def _grid_image(
 
 
 def _ring_centers(rings) -> list[tuple[float, float]]:
+    """Centre de la boîte englobante de chaque anneau.
+
+    Une moyenne des sommets serait biaisée : un contour tracé au pixel n'a pas
+    ses sommets répartis régulièrement (Douglas-Peucker les concentrate aux
+    angles), ce qui déplace la moyenne sans que la forme bouge.
+    """
     return [
         (
-            sum(point["x"] for point in ring) / len(ring),
-            sum(point["y"] for point in ring) / len(ring),
+            (min(point["x"] for point in ring) + max(point["x"] for point in ring)) / 2,
+            (min(point["y"] for point in ring) + max(point["y"] for point in ring)) / 2,
         )
         for ring in rings
     ]
@@ -115,6 +124,46 @@ def test_stray_blob_does_not_split_a_field():
 
     # Une tache parasite ne doit ni créer de parcelle, ni découper une cellule.
     assert len(with_blob) == len(without) == 9
+
+
+def _grid_with_gap(gap_px: int, columns: int = 4, rows: int = 4) -> Image.Image:
+    """Grille dont une limite interne est interrompue sur `gap_px` pixels.
+
+    Le modèle laisse couramment ce genre de jour entre deux limites qui se
+    rejoignent ; c'est la cause directe de deux parcelles fusionnées.
+    """
+    image = _grid_image(columns=columns, rows=rows)
+    draw = ImageDraw.Draw(image)
+    cell_w = SIZE // columns
+    cell_h = SIZE // rows
+    x = cell_w  # limite verticale entre la colonne 0 et la colonne 1
+    top = cell_h + 20  # franchement sous la première limite horizontale
+    draw.rectangle((x, top, x + 2, top + gap_px - 1), fill=FIELD_COLORS[0])
+    return image
+
+
+def test_gap_in_a_boundary_does_not_merge_neighbours():
+    image = _grid_with_gap(7)
+    mask = _drop_blobs(_red_mask(np.asarray(image)))
+
+    # Un rayon figé au minimum ne referme pas un jour de 7 pixels : c'était le
+    # défaut — les deux cellules voisines ressortaient n'en formant qu'une.
+    assert not np.array_equal(_separating_mask(mask), _dilate_lines(mask, DILATE_MIN_PX))
+    # La recherche du rayon, elle, rend bien une parcelle par cellule.
+    assert len(parcel_rings_from_red_lines(_png(image))) == 16
+
+
+def test_search_does_not_thicken_more_than_needed():
+    # Grille déjà bien fermée : aucune raison d'épaissir au-delà du minimum, ce
+    # qui raboterait les parcelles et ferait disparaître les plus étroites.
+    mask = _drop_blobs(_red_mask(np.asarray(_grid_image(columns=3, rows=3))))
+
+    assert np.array_equal(_separating_mask(mask), _dilate_lines(mask, DILATE_MIN_PX))
+
+
+def test_gap_wider_than_the_search_limit_stays_merged():
+    """Limite assumée : au-delà de deux fois le rayon maximal, le jour subsiste."""
+    assert len(parcel_rings_from_red_lines(_png(_grid_with_gap(60)))) == 15
 
 
 def _enclosure(with_divider: bool) -> Image.Image:

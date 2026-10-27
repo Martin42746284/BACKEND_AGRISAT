@@ -19,10 +19,16 @@ Ce module transforme l'image en polygones géoréférencés :
     3. dilatation des traits : le modèle laisse de petits jours entre deux
        limites qui se rejoignent, et un seul jour suffit à faire communiquer
        deux parcelles. Dilater le rouge est l'opération sûre — elle ne peut que
-       renforcer une séparation, jamais fusionner deux zones déjà distinctes ;
+       renforcer une séparation, jamais fusionner deux zones déjà distinctes.
+       Le rayon n'est pas fixé : il est augmenté jusqu'à ce que le nombre de
+       parcelles cesse de progresser, ce qui ferme les jours les plus larges
+       sans raboter les parcelles plus que nécessaire ;
     4. composantes connexes du COMPLÉMENT : chaque zone non rouge enfermée par
        des limites est une parcelle ;
-    5. mise en polygone, puis passage en coordonnées normalisées (0–1).
+    5. extension de chaque parcelle sur les traits épaissis, jusqu'à la
+       médiatrice avec sa voisine : les contours se touchent sans se recouvrir et
+       l'épaississement de l'étape 3 ne rabote plus les parcelles ;
+    6. mise en polygone, puis passage en coordonnées normalisées (0–1).
 
 Le résultat est une liste d'anneaux normalisés, directement acceptés par
 `gemini_parcels._candidate_from_ring`, qui applique la validation (surface
@@ -66,11 +72,11 @@ RED_DOMINANCE = 45
 # considérée comme parasite. Les limites traversent l'image ; les taches du
 # modèle mesurent quelques dizaines de pixels au plus.
 BLOB_MAX_EXTENT_PX = 45
-# Rayon de dilatation des traits, en fraction du côté de l'image (indépendant de
-# la résolution renvoyée par le modèle). Dilater referme les jours entre limites
-# au prix d'une contraction des parcelles de ce rayon : négligeable (moins d'un
-# mètre au sol) devant la taille d'un champ.
-DILATE_RATIO = 0.002
+# Épaississement des traits. Un trait interrompu sur quelques pixels suffit à
+# faire communiquer deux parcelles voisines : le rayon n'est donc pas figé, il
+# est cherché dans cette plage (voir `_separating_mask`). Comme `_grow_labels`
+# rend ensuite à chaque parcelle la surface perdue, épaissir ne coûte rien ; au
+# delà de cette plage, seules des séparations parasites apparaissent.
 DILATE_MIN_PX = 2
 DILATE_MAX_PX = 6
 
@@ -113,8 +119,13 @@ def _drop_blobs(mask: np.ndarray) -> np.ndarray:
     return keep
 
 
-def _dilate_lines(mask: np.ndarray) -> np.ndarray:
-    """Épaissit les traits pour refermer les jours entre limites voisines.
+# Voisinage direct : deux parcelles qui ne se touchent que par un coin restent
+# distinctes, comme sur le terrain.
+_FOUR_CONNECTED = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+
+def _dilate_lines(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Épaissit les traits de `radius` pixels pour refermer les jours.
 
     On dilate au lieu de fermer : une fermeture (dilatation puis érosion)
     rouvre les jours fins qu'elle vient de combler et peut faire communiquer
@@ -122,12 +133,69 @@ def _dilate_lines(mask: np.ndarray) -> np.ndarray:
     à une seule. La dilatation seule est monotone : elle ne fait qu'ajouter du
     rouge, donc ne peut que séparer davantage.
     """
-    side = int(min(mask.shape[:2]))
-    radius = int(round(side * DILATE_RATIO))
-    radius = max(DILATE_MIN_PX, min(DILATE_MAX_PX, radius))
+    radius = max(1, int(radius))
     y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
     disk = (x * x + y * y) <= radius * radius
     return ndimage.binary_dilation(mask, structure=disk, border_value=0)
+
+
+def _count_parcels(separating: np.ndarray, min_area: float) -> int:
+    """Nombre de parcelles qu'une épaisseur de traits donnée fait ressortir."""
+    interior = ~separating
+    labels, count = ndimage.label(interior, structure=_FOUR_CONNECTED)
+    if count == 0:
+        return 0
+    areas = np.bincount(labels.ravel(), minlength=count + 1)
+    # Le fond est la zone reliée au bord : on l'exclut quand elle est immense,
+    # mais une parcelle de bord, elle, doit être conservée.
+    on_border = np.unique(
+        np.concatenate(
+            [labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]
+        )
+    )
+    is_background = np.zeros(count + 1, dtype=bool)
+    is_background[on_border] = True
+    is_background &= areas > BACKGROUND_BORDER_RATIO * interior.size
+
+    keep = areas >= min_area
+    keep[0] = False  # étiquette 0 = pixels rouges, pas une parcelle
+    keep &= ~is_background
+    return int(np.count_nonzero(keep))
+
+
+def _separating_mask(mask: np.ndarray) -> np.ndarray:
+    """Épaississement retenu pour séparer le plus de parcelles distinctes.
+
+    Un jour de quelques pixels dans un trait fusionne deux parcelles voisines.
+    Le rayon nécessaire dépend du modèle et de la résolution qu'il renvoie : il
+    est donc évalué sur la plage `DILATE_MIN_PX`–`DILATE_MAX_PX`, et le plus
+    petit rayon qui atteint le meilleur compte est gardé. Épaissir ne rabote
+    rien puisque `_grow_labels` rend ensuite sa surface à chaque parcelle.
+    """
+    min_area = PARCEL_MIN_RATIO * mask.size
+    best_radius = DILATE_MIN_PX
+    best_count = -1
+    for radius in range(DILATE_MIN_PX, DILATE_MAX_PX + 1):
+        count = _count_parcels(_dilate_lines(mask, radius), min_area)
+        if count > best_count:
+            best_radius, best_count = radius, count
+    return _dilate_lines(mask, best_radius)
+
+
+def _grow_labels(labels: np.ndarray, separating: np.ndarray) -> np.ndarray:
+    """Rend à chaque parcelle la bande de traits épaissis qu'elle a perdue.
+
+    Chaque pixel de la bande est attribué à la parcelle la plus proche : deux
+    voisines se rejoignent sur la médiatrice du trait qui les sépare, c'est-à-dire
+    exactement là où passe la limite réelle. Les contours se touchent donc sans
+    se recouvrir, et l'épaississement ne réduit plus la surface des parcelles.
+    """
+    if not separating.any() or not labels.any():
+        return labels
+    indices = ndimage.distance_transform_edt(
+        separating, return_distances=False, return_indices=True
+    )
+    return labels[tuple(indices)]
 
 
 def _touches_border(component: np.ndarray) -> bool:
@@ -222,11 +290,14 @@ def parcel_rings_from_red_lines(image_bytes: bytes) -> list[list[dict[str, float
     mask = _drop_blobs(_red_mask(rgb))
     if not mask.any():
         raise ValueError("Aucun trait rouge détecté dans l'image renvoyée.")
-    interior = ~_dilate_lines(mask)
+    separating = _separating_mask(mask)
+    interior = ~separating
 
-    labels, count = ndimage.label(interior, structure=np.array(
-        [[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int))
-    total = interior.size
+    labels, count = ndimage.label(interior, structure=_FOUR_CONNECTED)
+    # Chaque parcelle reprend la bande de traits jusqu'à la médiatrice : sans
+    # cela, épaissir les traits raboterait d'autant sa surface.
+    labels = _grow_labels(labels, separating)
+    total = labels.size
     rings: list[list[dict[str, float]]] = []
     for index in range(1, count + 1):
         component = labels == index
