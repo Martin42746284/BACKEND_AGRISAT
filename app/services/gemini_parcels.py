@@ -38,6 +38,7 @@ import logging
 import math
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -161,6 +162,21 @@ class GeminiConfigurationError(RuntimeError):
 
 class GeminiUnavailable(RuntimeError):
     """Static Maps ou Gemini injoignable en erreur (réponse 502)."""
+
+
+# Progression réelle du pipeline : chaque appel indique un palier effectivement
+# atteint (tuiles téléchargées, fenêtres Gemini terminées, écriture en base).
+# Le flux HTTP de `/api/gemini-parcels/stream` relaie ces événements tels quels.
+ProgressReporter = Callable[[int, str], Awaitable[None]]
+
+
+async def _report(
+    progress: ProgressReporter | None,
+    percent: int,
+    label: str,
+) -> None:
+    if progress is not None:
+        await progress(max(0, min(100, percent)), label)
 
 
 @dataclass
@@ -423,6 +439,7 @@ async def _capture_mosaic(
     tile_span_m: float,
     zoom: int | None,
     maps_key: str,
+    progress: ProgressReporter | None = None,
 ) -> Capture:
     """Assemble une grille de tuiles Static Maps, chacune couvrant `tile_span_m`."""
     max_size_px = _max_capture_size_px()
@@ -456,14 +473,25 @@ async def _capture_mosaic(
             )
 
     semaphore = asyncio.Semaphore(5)
+    fetched = 0
+    total_tiles = len(centers)
 
     async with httpx.AsyncClient(timeout=45.0) as client:
 
         async def fetch(tile_lat: float, tile_lng: float) -> bytes:
+            nonlocal fetched
             async with semaphore:
-                return await _fetch_static_map(
+                data = await _fetch_static_map(
                     client, tile_lat, tile_lng, tile_zoom, tile_size, maps_key, scale=1
                 )
+            fetched += 1
+            # 3 → 38 % : progression réelle du téléchargement des tuiles.
+            await _report(
+                progress,
+                3 + round(35 * fetched / max(1, total_tiles)),
+                f"Capture satellite — {fetched}/{total_tiles} tuiles",
+            )
+            return data
 
         images = await asyncio.gather(*(fetch(lat, lng) for lat, lng in centers))
 
@@ -511,6 +539,7 @@ async def _capture_screen_viewport(
     height_px: int,
     maps_key: str,
     bounds: dict[str, float] | None = None,
+    progress: ProgressReporter | None = None,
 ) -> Capture:
     """Capture satellite haute résolution correspondant exactement à l'écran visible."""
     chosen_zoom = max(MIN_ZOOM, min(MAX_ZOOM, zoom))
@@ -549,9 +578,11 @@ async def _capture_screen_viewport(
     span_m = max(cover_w, cover_h) * mpp
 
     semaphore = asyncio.Semaphore(5)
+    fetched = 0
 
     async def fetch_tile(r: int, c: int) -> tuple[int, int, Image.Image]:
         """Une cellule : `size` couvre exactement son terrain, `scale` le suréchantillonne."""
+        nonlocal fetched
         tcx = x_min + (c + 0.5) * cell_w
         tcy = y_min + (r + 0.5) * cell_h
         req_w = max(1, min(STATIC_MAPS_MAX_SIZE, int(math.ceil(cell_w))))
@@ -592,6 +623,12 @@ async def _capture_screen_viewport(
         top = int(round(r * out_h / rows))
         width = int(round((c + 1) * out_w / cols)) - left
         height = int(round((r + 1) * out_h / rows)) - top
+        fetched += 1
+        await _report(
+            progress,
+            3 + round(35 * fetched / max(1, tiles_count)),
+            f"Capture satellite — {fetched}/{tiles_count} tuiles",
+        )
         return left, top, image.resize((max(1, width), max(1, height)), Image.LANCZOS)
 
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -929,7 +966,9 @@ async def _call_gemini_image(image_bytes: bytes, api_key: str) -> bytes:
 
 
 async def _analyze_windows(
-    windows: list[Capture], gemini_key: str
+    windows: list[Capture],
+    gemini_key: str,
+    progress: ProgressReporter | None = None,
 ) -> tuple[list[dict[str, Any]], list[Capture], list[Exception]]:
     """Analyse chaque fenêtre (quatre appels à la fois) et recolle les contours.
 
@@ -937,14 +976,27 @@ async def _analyze_windows(
     en échec : une fenêtre perdue n'empêche pas de récupérer les autres.
     """
     if len(windows) == 1:
+        await _report(progress, 44, "Analyse de l’image par Gemini…")
         rings = await _window_rings(windows[0], gemini_key)
+        await _report(progress, 78, "Contours détectés")
         return rings, [windows[0]] * len(rings), []
 
     semaphore = asyncio.Semaphore(MAX_PARALLEL_GEMINI_CALLS)
+    completed = 0
 
     async def analyze(window: Capture) -> list[dict[str, Any]]:
+        nonlocal completed
         async with semaphore:
-            return await _window_rings(window, gemini_key)
+            try:
+                return await _window_rings(window, gemini_key)
+            finally:
+                completed += 1
+                # 42 → 78 % : une fenêtre réellement terminée, réussie ou non.
+                await _report(
+                    progress,
+                    42 + round(36 * completed / max(1, len(windows))),
+                    f"Analyse Gemini — fenêtre {completed}/{len(windows)}",
+                )
 
     results = await asyncio.gather(*(analyze(window) for window in windows), return_exceptions=True)
     failed = [result for result in results if isinstance(result, Exception)]
@@ -1456,13 +1508,15 @@ async def detect_parcels_gemini(
     viewport_width: int | None = None,
     viewport_height: int | None = None,
     bounds: dict[str, float] | None = None,
+    progress: ProgressReporter | None = None,
 ) -> dict[str, Any]:
     """Capture satellite → détection Gemini par fenêtres → validation → base.
 
     Chaque fenêtre est géoréférencée et analysée séparément ; les contours sont
     ensuite recollés, les doublons entre fenêtres éliminés et les parcelles déjà
-    délimitées écartées.
+    délimitées écartées. `progress` reçoit des paliers réels du traitement.
     """
+    await _report(progress, 1, "Préparation de la capture…")
     gemini_key = (settings.gemini_api_key or "").strip()
     maps_key = (settings.google_maps_api_key or "").strip()
     if not gemini_key and not maps_key:
@@ -1481,6 +1535,7 @@ async def detect_parcels_gemini(
 
     is_screen_capture = bool(viewport_width and viewport_height)
 
+    await _report(progress, 3, "Capture de l’image satellite…")
     if is_screen_capture:
         # `round` et non `int` : la carte accepte un zoom fractionnaire, et
         # tronquer 16.6 en 16 éloigne la capture des tuiles réellement affichées.
@@ -1493,6 +1548,7 @@ async def detect_parcels_gemini(
             height_px=int(viewport_height),  # type: ignore[arg-type]
             maps_key=maps_key,
             bounds=bounds,
+            progress=progress,
         )
     else:
         requested_span = max(MIN_CAPTURE_SPAN_M, min(MAX_CAPTURE_SPAN_M, float(span_m)))
@@ -1505,15 +1561,26 @@ async def detect_parcels_gemini(
 
         if requested_tile < requested_span:
             capture = await _capture_mosaic(
-                latitude, longitude, requested_span, requested_tile, zoom, maps_key
+                latitude,
+                longitude,
+                requested_span,
+                requested_tile,
+                zoom,
+                maps_key,
+                progress=progress,
             )
         else:
             capture = await _capture_satellite(latitude, longitude, requested_span, zoom, maps_key)
 
+    await _report(progress, 40, "Image satellite capturée")
     # Fenêtres haute résolution : la capture d'écran est découpée comme les
     # mosaïques, ce qui divise le mètre par pixel du tracé du modèle.
     windows = _split_windows(capture)
-    raw_parcels, raw_windows, failed_windows = await _analyze_windows(windows, gemini_key)
+    await _report(progress, 42, "Analyse de l’image par Gemini…")
+    raw_parcels, raw_windows, failed_windows = await _analyze_windows(
+        windows, gemini_key, progress
+    )
+    await _report(progress, 80, "Géoréférencement et dédoublonnage…")
 
     rejected = 0
     candidates: list[Candidate] = []
@@ -1556,6 +1623,7 @@ async def detect_parcels_gemini(
             continue
         unique.append(candidate)
 
+    await _report(progress, 86, "Comparaison avec les parcelles existantes…")
     rows = await load_parcels_in_area(latitude, longitude, max(capture.span_m * 1.2, 120.0))
     existing = _existing_parcels(rows, capture)
     tree = STRtree([item.geom for item in existing]) if existing else None
@@ -1604,10 +1672,12 @@ async def detect_parcels_gemini(
         )
 
     if persist and fresh:
+        await _report(progress, 92, f"Enregistrement de {len(fresh)} parcelle(s)…")
         parcels = await _persist(fresh, capture)
     else:
         parcels = [_preview_row(candidate) for candidate in fresh]
 
+    await _report(progress, 99, "Finalisation du résultat…")
     logger.info(
         "gemini-parcels : %d détectée(s), %d nouvelle(s), %d doublon(s), %d rejetée(s) "
         "(zoom %d, %.0f m, %d tuile(s) de %.0f m)",
