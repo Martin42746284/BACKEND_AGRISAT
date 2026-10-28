@@ -406,9 +406,20 @@ async def store_parcel_analysis(
                 return None, STORE_NOT_FOUND
         else:
             nearby = await _load_parcels_in_area(session, center_lat, center_lng, max(ANALYSIS_MATCH_TOLERANCE_M * 3, 100.0))
-            # La ligne déjà analysée prime : c'est elle qui porte les données à
-            # préserver (et à remplacer en cas de relance explicite).
-            row = nearest_analyzed_parcel(nearby, center_lat, center_lng) or nearest_parcel(nearby, center_lat, center_lng)
+            # Pour un tracé à l'écran sans identifiant de base, on ne doit PAS
+            # réutiliser une parcelle déjà analysée voisine par simple proximité :
+            # cela provoquait la disparition de la parcelle nouvellement tracée et
+            # analysée après actualisation. On ne reprend une parcelle existante
+            # que si elle est très proche et non encore analysée, ou en cas de
+            # relance explicite (force).
+            nearest_existing = nearest_parcel(nearby, center_lat, center_lng)
+            nearest_analyzed = nearest_analyzed_parcel(nearby, center_lat, center_lng)
+            if nearest_analyzed is not None and force:
+                row = nearest_analyzed
+            elif nearest_existing is not None and not row_has_analysis(nearest_existing):
+                row = nearest_existing
+            else:
+                row = None
 
         if row is not None and row_has_analysis(row) and not force:
             return serialize_parcelle(row), STORE_ALREADY_ANALYZED
@@ -418,6 +429,9 @@ async def store_parcel_analysis(
             session.add(row)
             await session.commit()
             await session.refresh(row)
+            from app import cache
+
+            cache.invalidate()
             return serialize_parcelle(row), STORE_CREATED
 
         values["label"] = row.label
@@ -425,4 +439,7 @@ async def store_parcel_analysis(
             setattr(row, key, value)
         await session.commit()
         await session.refresh(row)
+        from app import cache
+
+        cache.invalidate()
         return serialize_parcelle(row), STORE_UPDATED

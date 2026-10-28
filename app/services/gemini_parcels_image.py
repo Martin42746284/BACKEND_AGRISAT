@@ -24,7 +24,9 @@ Ce module transforme l'image en polygones géoréférencés :
        parcelles cesse de progresser, ce qui ferme les jours les plus larges
        sans raboter les parcelles plus que nécessaire ;
     4. composantes connexes du COMPLÉMENT : chaque zone non rouge enfermée par
-       des limites est une parcelle ;
+       des limites est une parcelle. Une zone qui atteint le bord de l'image est
+       écartée : elle n'est que partiellement visible, sa limite réelle est hors
+       champ et la tracer produirait un contour tronqué ;
     5. extension de chaque parcelle sur les traits épaissis, jusqu'à la
        médiatrice avec sa voisine : les contours se touchent sans se recouvrir et
        l'épaississement de l'étape 3 ne rabote plus les parcelles ;
@@ -40,9 +42,10 @@ Limites connues
 * Une limite non fermée fait communiquer deux parcelles voisines : elles
   ressortent fusionnées. C'est la même faiblesse que le modèle de segmentation
   VHR, mais elle est ici visible et localisée (le trou dans la ligne).
-* Le fond (tout ce qui n'est pas une parcelle : bâti, routes, image extérieure)
-  est la zone reliée au bord de l'image. Les grandes zones de bord sont
-  écartées ; une petite parcelle de bord, elle, est conservée.
+* Une parcelle coupée par le bord de la capture n'est jamais tracée, même
+  petite : seule une parcelle entièrement visible donne un contour fiable. Le
+  fond (tout ce qui n'est pas une parcelle : bâti, routes, image extérieure) est
+  lui aussi une zone reliée au bord, donc écarté par la même règle.
 * La résolution de l'image renvoyée par Gemini varie (souvent 1024 px). Comme
   tout est ramené en coordonnées normalisées, cela n'a pas d'incidence — à
   condition que le modèle n'ait ni recadré ni déformé la scène (voir
@@ -65,20 +68,20 @@ logger = logging.getLogger("agrisat.services.gemini_parcels_image")
 # Un pixel est « limite » quand le rouge domine franchement le vert et le bleu.
 # Large volontairement : les traits dessinés sont parfois atténués (survol,
 # flou), mais un champ n'est jamais franchement plus rouge que vert et bleu.
-RED_MIN = 110
-RED_DOMINANCE = 45
+RED_MIN = 105
+RED_DOMINANCE = 40
 
 # Une tache rouge qui n'atteint cette longueur (px) dans AUCUNE direction est
 # considérée comme parasite. Les limites traversent l'image ; les taches du
 # modèle mesurent quelques dizaines de pixels au plus.
-BLOB_MAX_EXTENT_PX = 45
+BLOB_MAX_EXTENT_PX = 30
 # Épaississement des traits. Un trait interrompu sur quelques pixels suffit à
 # faire communiquer deux parcelles voisines : le rayon n'est donc pas figé, il
 # est cherché dans cette plage (voir `_separating_mask`). Comme `_grow_labels`
 # rend ensuite à chaque parcelle la surface perdue, épaissir ne coûte rien ; au
 # delà de cette plage, seules des séparations parasites apparaissent.
 DILATE_MIN_PX = 2
-DILATE_MAX_PX = 6
+DILATE_MAX_PX = 8
 
 # Part de l'image au-delà de laquelle une zone reliée au bord est le fond
 # (bâti, routes, image hors parcelles) et non une parcelle coupée par le bord.
@@ -198,13 +201,41 @@ def _grow_labels(labels: np.ndarray, separating: np.ndarray) -> np.ndarray:
     return labels[tuple(indices)]
 
 
-def _touches_border(component: np.ndarray) -> bool:
-    return bool(
-        component[0, :].any()
-        or component[-1, :].any()
-        or component[:, 0].any()
-        or component[:, -1].any()
+def _ring_on_border(ring: list[dict[str, float]]) -> bool:
+    """Vrai si un sommet du contour atteint le bord de l'image.
+
+    Second cas de parcelle coupée : le modèle peut refermer une parcelle sur le
+    bord lui-même (il dessine alors un trait le long du bord). La zone non rouge
+    ne touche pas le bord, mais le contour final, lui, s'arrête pile dessus : la
+    parcelle continue hors champ et sa limite ne doit pas être tracée.
+    """
+    eps = 1e-6
+    return any(
+        point["x"] <= eps
+        or point["x"] >= 1 - eps
+        or point["y"] <= eps
+        or point["y"] >= 1 - eps
+        for point in ring
     )
+
+
+def _clipped_labels(labels: np.ndarray, count: int) -> np.ndarray:
+    """Étiquettes présentes sur le bord de l'image, c'est-à-dire coupées.
+
+    Une parcelle dont la zone atteint le bord n'est pas entièrement dans la
+    capture : sa limite réelle est hors champ. Tracer ce qu'on en voit donnerait
+    un contour tronqué, qu'on pourrait prendre pour la délimitation exacte d'une
+    parcelle déjà enregistrée. Le fond (bâti, routes, hors parcelles) est lui
+    aussi une zone de bord : il disparaît par la même règle.
+    """
+    clipped = np.zeros(count + 1, dtype=bool)
+    if count == 0:
+        return clipped
+    border = np.concatenate(
+        [labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]
+    )
+    clipped[np.unique(border)] = True
+    return clipped
 
 
 def _component_ring(component: np.ndarray) -> list[dict[str, float]] | None:
@@ -294,26 +325,39 @@ def parcel_rings_from_red_lines(image_bytes: bytes) -> list[list[dict[str, float
     interior = ~separating
 
     labels, count = ndimage.label(interior, structure=_FOUR_CONNECTED)
+    # Le contact avec le bord est relevé AVANT `_grow_labels` : ensuite chaque
+    # parcelle s'étend sur les traits jusqu'au bord de l'image, et une parcelle
+    # intérieure longeant un trait de bord toucherait le bord sans être coupée.
+    clipped = _clipped_labels(labels, count)
     # Chaque parcelle reprend la bande de traits jusqu'à la médiatrice : sans
     # cela, épaissir les traits raboterait d'autant sa surface.
     labels = _grow_labels(labels, separating)
     total = labels.size
     rings: list[list[dict[str, float]]] = []
+    dropped_clipped = 0
     for index in range(1, count + 1):
+        if clipped[index]:
+            # Parcelle coupée par la capture : elle n'est pas entièrement visible.
+            dropped_clipped += 1
+            continue
         component = labels == index
         area = int(component.sum())
         if area < PARCEL_MIN_RATIO * total:
             continue
-        if _touches_border(component) and area > BACKGROUND_BORDER_RATIO * total:
-            # Zone reliée au bord et énorme : c'est le fond, pas une parcelle.
-            continue
         ring = _component_ring(component)
-        if ring is not None:
-            rings.append(ring)
+        if ring is None:
+            continue
+        if _ring_on_border(ring):
+            # Contour refermé sur le bord de la capture : parcelle coupée.
+            dropped_clipped += 1
+            continue
+        rings.append(ring)
 
     logger.info(
-        "Lignes rouges : %d parcelle(s) reconstruite(s) (%.2f %% de pixels rouges).",
+        "Lignes rouges : %d parcelle(s) reconstruite(s) (%.2f %% de pixels rouges), "
+        "%d zone(s) de bord écartée(s) car coupée(s) par la capture.",
         len(rings),
         100.0 * float(mask.sum()) / total,
+        dropped_clipped,
     )
     return rings

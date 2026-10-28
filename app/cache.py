@@ -78,5 +78,6 @@ async def load_parcelles() -> list[Parcelle]:
 
 
 def invalidate() -> None:
-    global _cache
+    global _cache, _inflight_request
     _cache = None
+    _inflight_request = None

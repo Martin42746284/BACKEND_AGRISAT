@@ -6,15 +6,28 @@ capture ne voyait donc que la moitié du terrain annoncé par le géoréférence
 et chaque parcelle ressortait deux fois plus loin du centre qu'elle ne l'est.
 """
 
+import io
 import math
 
 import pytest
+from PIL import Image
 
 from app.services.gemini_parcels import (
+    MAX_ANALYSIS_WINDOWS,
     SCREEN_CAPTURE_SCALE,
     STATIC_MAPS_MAX_SIZE,
+    WINDOW_UPSCALE_PX,
+    Capture,
+    _lat_to_px,
+    _lng_to_px,
+    _mercator_world_px,
+    _meters_per_pixel,
+    _px_to_lat,
+    _px_to_lng,
+    _split_windows,
     _valid_bounds,
     _viewport_tiling,
+    _window_grid,
 )
 
 
@@ -77,3 +90,88 @@ def test_valid_bounds_accepts_ordered_box():
 )
 def test_valid_bounds_rejects_unusable_box(bounds):
     assert not _valid_bounds(bounds)
+
+
+# ── Découpage en fenêtres haute résolution ──
+
+def _screen_capture(width: int = 1200, height: int = 700) -> Capture:
+    """Capture d'écran de synthèse, géoréférencée comme le fait `_capture_screen_viewport`."""
+    image = Image.new("RGB", (width, height), (90, 110, 80))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    center_lat, center_lng, zoom = -19.85, 47.01, 18
+    world_px = _mercator_world_px(zoom)
+    # Une capture d'écran rend `SCREEN_CAPTURE_SCALE` pixels par pixel de carte.
+    mpp = _meters_per_pixel(center_lat, zoom) / SCREEN_CAPTURE_SCALE
+    map_px_per_image_px = 1.0 / SCREEN_CAPTURE_SCALE
+    half_x = width / 2.0 * map_px_per_image_px
+    half_y = height / 2.0 * map_px_per_image_px
+    cx = _lng_to_px(center_lng, world_px)
+    cy = _lat_to_px(center_lat, world_px)
+    return Capture(
+        center_lat=center_lat, center_lng=center_lng, zoom=zoom,
+        span_m=max(width, height) * mpp,
+        size_px=max(width, height),
+        south=_px_to_lat(cy + half_y, world_px),
+        west=_px_to_lng(cx - half_x, world_px),
+        north=_px_to_lat(cy - half_y, world_px),
+        east=_px_to_lng(cx + half_x, world_px),
+        image_bytes=buffer.getvalue(), width_px=width, height_px=height,
+    )
+
+
+def test_wide_capture_is_split_into_overlapping_windows():
+    capture = _screen_capture()
+    windows = _split_windows(capture)
+
+    assert 1 < len(windows) <= MAX_ANALYSIS_WINDOWS
+    for window in windows:
+        # Fenêtres carrées, rééchantillonnées pour le modèle.
+        assert window.image_bytes
+        with Image.open(io.BytesIO(window.image_bytes)) as image:
+            assert image.width == image.height
+            assert image.width == max(WINDOW_UPSCALE_PX, window.size_px)
+        # Un pixel de fenêtre couvre bien moins de terrain qu'un pixel de la capture.
+        assert window.span_m < capture.span_m
+
+
+def test_windows_cover_the_whole_capture_and_overlap():
+    capture = _screen_capture()
+    windows = _split_windows(capture)
+
+    west = min(window.west for window in windows)
+    east = max(window.east for window in windows)
+    south = min(window.south for window in windows)
+    north = max(window.north for window in windows)
+    assert west == pytest.approx(capture.west, abs=1e-6)
+    assert east == pytest.approx(capture.east, abs=1e-6)
+    assert south == pytest.approx(capture.south, abs=1e-6)
+    assert north == pytest.approx(capture.north, abs=1e-6)
+    for window in windows:
+        assert window.west >= capture.west - 1e-9
+        assert window.east <= capture.east + 1e-9
+        assert window.south >= capture.south - 1e-9
+        assert window.north <= capture.north + 1e-9
+    # Deux fenêtres voisines se recouvrent : aucune bande de terrain n'est sautée.
+    world_px = _mercator_world_px(capture.zoom)
+    mpp = _meters_per_pixel(capture.center_lat, capture.zoom)
+    window_map_px = windows[0].span_m / mpp
+    xs = sorted({round(_lng_to_px(window.west, world_px), 6) for window in windows})
+    ys = sorted({round(_lat_to_px(window.north, world_px), 6) for window in windows})
+    for previous, current in zip(xs, xs[1:]):
+        assert current - previous < window_map_px
+    for previous, current in zip(ys, ys[1:]):
+        assert current - previous < window_map_px
+
+
+def test_narrow_capture_is_analysed_in_a_single_call():
+    capture = _screen_capture()
+    # Vue de 250 m : déjà assez détaillée pour un seul appel.
+    capture.span_m = 250.0
+
+    assert _split_windows(capture) == [capture]
+
+
+def test_very_wide_view_falls_back_to_a_single_call():
+    # 4 000 x 2 000 px à 0,5 m/px : plus de 12 fenêtres même en 480 m.
+    assert _window_grid(4000, 2000, 0.5) == (0, [], [])

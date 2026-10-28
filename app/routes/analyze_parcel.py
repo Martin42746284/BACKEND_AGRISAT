@@ -65,7 +65,11 @@ async def analyze_single_parcel(request: Request) -> JSONResponse:
     if unknown_id:
         return JSONResponse(status_code=404, content={"error": "Parcelle introuvable."})
 
-    if existing is not None and values_have_analysis(existing) and not parsed.force:
+    # Ne pas bloquer l'analyse d'un tracé à la main (sans ID en base) juste
+    # parce qu'une parcelle déjà analysée se trouve à proximité. Le blocage
+    # « déjà analysée » ne s'applique qu'à une relance explicite sur une parcelle
+    # identifiée (UUID) ou quand on vise clairement la même ligne en base.
+    if parsed.parcel_id and existing is not None and values_have_analysis(existing) and not parsed.force:
         return JSONResponse(
             status_code=409,
             content={

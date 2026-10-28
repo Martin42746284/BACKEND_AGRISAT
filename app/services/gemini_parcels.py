@@ -6,14 +6,19 @@ Principe
    frontend), centrée sur le centre de la carte. Pour couvrir environ
    `GEMINI_CAPTURE_SPAN_M` mètres en conservant le détail métrique d'une tuile
    de `GEMINI_CAPTURE_TILE_SPAN_M` mètres (le zoom Static Maps est plafonné à
-   21), plusieurs tuiles contiguës sont assemblées en une mosaïque.
+   21), plusieurs tuiles contiguës sont assemblées en une mosaïque. La capture
+   d'écran, elle, est analysée par fenêtres carrées de ~200–480 m qui se
+   chevauchent : le modèle dessine à une résolution quasi fixe, donc une image
+   plus petite par appel donne un tracé nettement plus fin (voir `_split_windows`).
 2. L'image est envoyée à Gemini avec une réponse JSON structurée : chaque
    parcelle est un anneau de points normalisés (0–1) dans l'image.
 3. Les points sont géoréférencés par la projection Web Mercator du zoom Static
    Maps (mêmes bornes que l'image), puis convertis en polygones métriques pour
    valider la forme et calculer surface/centroïde.
-4. Les contours déjà présents en base (IoU ou centroïde proche) sont écartés :
-   aucune ligne en double n'est créée.
+4. Les contours déjà présents en base (IoU, centroïde proche, ou surface
+   largement recouverte par des parcelles délimitées) sont écartés : aucune
+   ligne en double n'est créée et aucune limite existante n'est modifiée. Seules
+   les parcelles qui ne sont pas encore délimitées sont enregistrées.
 5. Les nouveaux contours sont enregistrés dans `parcelles` avec un UUID et
    `data_source = « Détection Gemini »`, tous les champs de culture à NULL.
    Ils suivent alors exactement le même chemin qu'un contour importé par KML :
@@ -41,6 +46,7 @@ from typing import Any
 import httpx
 from PIL import Image
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 from shapely.strtree import STRtree
 from sqlalchemy import select
 
@@ -81,14 +87,32 @@ MAX_CAPTURE_SIZE_PX = 640
 MIN_CAPTURE_SPAN_M = 10.0
 MAX_CAPTURE_SPAN_M = 400.0
 MAX_MOSAIC_TILES = 5
-# La capture large est analysée par fenêtres qui se chevauchent : une seule image
-# de plusieurs centaines de parcelles dépasserait la sortie JSON de Gemini et
-# perdrait en précision. Le chevauchement dépasse la taille d'une parcelle courante,
-# de sorte que toute parcelle coupée par un bord est entière dans la fenêtre voisine.
-WINDOW_SPAN_M = 200.0
-WINDOW_STRIDE_M = 150.0
+# Toute capture est analysée par fenêtres qui se chevauchent. Le modèle d'image
+# dessine à une résolution quasi fixe (~1 024 px) : plus la fenêtre couvre peu de
+# terrain, plus le tracé est fin. Découper l'écran en fenêtres de 200 m au lieu
+# d'un seul appel sur ~800 m divise ainsi le mètre par pixel du tracé par 3 à 4,
+# ce qui supprime l'essentiel des débordements et des fusions entre parcelles.
+# Le chevauchement (25 %) dépasse la largeur d'une parcelle courante, de sorte
+# qu'une parcelle coupée par un bord interne est entière dans la fenêtre voisine.
+WINDOW_TARGETS_M = (200.0, 240.0, 280.0, 320.0, 400.0, 480.0)
+WINDOW_OVERLAP = 0.25
 WINDOW_UPSCALE_PX = 1280
+WINDOW_MIN_PX = 64
+# Plafond d'appels par capture : au-delà, les fenêtres s'agrandissent (moins de
+# détail) pour rester dans le budget de temps du client (480 s). Une vue plus
+# large que ce que permet la dernière taille de fenêtre est analysée d'un bloc.
+MAX_ANALYSIS_WINDOWS = 12
+# Une capture déjà étroite (≤ 300 m de large) est assez détaillée en un appel.
+SINGLE_CALL_SPAN_M = 300.0
+# Une fenêtre qui couvrirait plus de cette part de la capture n'apporterait pas
+# assez de détail pour justifier plusieurs appels : on garde un seul appel.
+MIN_WINDOW_GAIN = 0.6
 WINDOW_EDGE_MARGIN = 0.012
+# Marge du bord de la CAPTURE en deçà de laquelle un contour est considéré comme
+# coupé par la capture (mode texte, sans fenêtres). 0,4 % de l'image : un contour
+# entier s'arrête sur un trait, jamais sur le bord, tandis qu'une parcelle coupée
+# est tracée jusqu'au bord par le modèle.
+CAPTURE_EDGE_MARGIN = 0.004
 MAX_PARALLEL_GEMINI_CALLS = 4
 # Un appel Static Maps couvre au plus 640 px de terrain à un zoom donné. `scale=2`
 # DOUBLE LE NOMBRE DE PIXELS SANS ÉLARGIR LA COUVERTURE : c'est `size` qui fixe
@@ -111,6 +135,20 @@ _LABEL_PATTERN = re.compile(rf"^{re.escape(LABEL_PREFIX)}\s+(\d+)$", re.IGNORECA
 EXISTING_IOU_THRESHOLD = 0.55
 EXISTING_AREA_RATIO = 0.40
 CANDIDATE_IOU_THRESHOLD = 0.75
+# Part de la plus petite des deux surfaces au-delà de laquelle deux contours de
+# la même détection désignent la même parcelle (fenêtres qui se chevauchent).
+CANDIDATE_OVERLAP_THRESHOLD = 0.50
+# Part de la surface d'un contour nouveau déjà couverte par des parcelles en base
+# au-delà de laquelle il n'est pas une nouvelle parcelle. L'IoU ne suffit pas :
+# une parcelle déjà délimitée peut être retracée avec une forme assez différente
+# (précision du modèle, image d'une autre date) tout en la recouvrant largement,
+# et un contour qui fusionne une parcelle existante avec sa voisine neuve la
+# recouvre encore à ~50 %. Le seuil est sous 50 % pour attraper ces fusions.
+EXISTING_COVERAGE_THRESHOLD = 0.45
+# Part d'une parcelle en base reprise par un contour au-delà de laquelle ce
+# dernier l'écrase : un gros polygone qui englobe une petite parcelle existante
+# n'est pas une parcelle nouvelle, il faut préserver la limite enregistrée.
+EXISTING_CONTAINED_THRESHOLD = 0.60
 
 
 class GeminiParcelsError(RuntimeError):
@@ -585,40 +623,90 @@ async def _capture_screen_viewport(
     )
 
 
-def _split_windows(capture: Capture) -> list[Capture]:
-    """Découpe la capture en fenêtres chevauchantes, chacune géoréférencée."""
-    mpp = capture.span_m / capture.size_px
-    window_px = int(round(WINDOW_SPAN_M / mpp))
-    if window_px >= capture.size_px:
-        return [capture]
-    stride_px = max(1, int(round(WINDOW_STRIDE_M / mpp)))
-    per_side = int(math.ceil((capture.size_px - window_px) / stride_px)) + 1
-    starts = [
-        int(round(index * (capture.size_px - window_px) / (per_side - 1)))
-        for index in range(per_side)
+def _window_starts(size_px: int, window_px: int) -> list[int]:
+    """Départs de fenêtres sur un axe, répartis pour couvrir toute l'image.
+
+    Le pas ne dépasse jamais `1 - WINDOW_OVERLAP` de la fenêtre : deux fenêtres
+    voisines se chevauchent toujours d'au moins un quart de leur largeur.
+    """
+    if window_px >= size_px:
+        return [0]
+    stride = max(1, int(round(window_px * (1.0 - WINDOW_OVERLAP))))
+    count = int(math.ceil((size_px - window_px) / stride)) + 1
+    if count <= 1:
+        return [0]
+    return [
+        int(round(index * (size_px - window_px) / (count - 1)))
+        for index in range(count)
     ]
 
+
+def _window_grid(
+    width_px: int, height_px: int, mpp: float
+) -> tuple[int, list[int], list[int]]:
+    """Taille de fenêtre (px) et positions couvrant la capture.
+
+    La plus petite fenêtre qui reste sous `MAX_ANALYSIS_WINDOWS` appels est
+    retenue : c'est elle qui donne le tracé le plus fin. Retourne `(0, [], [])`
+    quand même la plus grande fenêtre ne suffit pas (vue très large).
+    """
+    for target_m in WINDOW_TARGETS_M:
+        window_px = min(int(round(target_m / mpp)), width_px, height_px)
+        if window_px < WINDOW_MIN_PX:
+            continue
+        starts_x = _window_starts(width_px, window_px)
+        starts_y = _window_starts(height_px, window_px)
+        if len(starts_x) * len(starts_y) <= MAX_ANALYSIS_WINDOWS:
+            return window_px, starts_x, starts_y
+    return 0, [], []
+
+
+def _split_windows(capture: Capture) -> list[Capture]:
+    """Découpe la capture en fenêtres carrées chevauchantes, géoréférencées.
+
+    Chaque fenêtre est rééchantillonnée à `WINDOW_UPSCALE_PX` : le modèle reçoit
+    une image plus grande que sa sortie, donc son tracé porte sur un terrain plus
+    fin. La capture d'écran (rectangulaire) est découpée comme les mosaïques.
+    """
+    if capture.span_m <= SINGLE_CALL_SPAN_M:
+        return [capture]
     try:
         full = Image.open(BytesIO(capture.image_bytes)).convert("RGB")
     except Exception as exc:
         raise GeminiUnavailable(f"Découpage de la capture impossible : {exc}") from exc
 
+    width_px, height_px = full.size
+    mpp = capture.span_m / max(width_px, height_px)
+    window_px, starts_x, starts_y = _window_grid(width_px, height_px, mpp)
+    if not window_px or (len(starts_x) == 1 and len(starts_y) == 1):
+        return [capture]
+    if window_px * mpp > capture.span_m * MIN_WINDOW_GAIN:
+        # Fenêtres trop proches de la taille de la capture : le gain de détail
+        # ne vaut pas plusieurs appels.
+        return [capture]
+
     world_px = _mercator_world_px(capture.zoom)
     center_x = _lng_to_px(capture.center_lng, world_px)
     center_y = _lat_to_px(capture.center_lat, world_px)
-    out_px = max(window_px, WINDOW_UPSCALE_PX)
+    # Une capture d'écran est rendue à `SCREEN_CAPTURE_SCALE` fois la résolution
+    # de la carte : un pixel d'image y vaut moins qu'un pixel du monde au zoom.
+    # Sans ce facteur, les fenêtres seraient décalées d'autant.
+    image_px_to_map_px = mpp / _meters_per_pixel(capture.center_lat, capture.zoom)
+    scale = max(1.0, WINDOW_UPSCALE_PX / window_px)
+    out_px = max(1, int(round(window_px * scale)))
+    half = window_px / 2.0
+    half_map = half * image_px_to_map_px
     windows: list[Capture] = []
-    for top in starts:
-        for left in starts:
+    for top in starts_y:
+        for left in starts_x:
             crop = full.crop((left, top, left + window_px, top + window_px))
             if out_px != window_px:
                 crop = crop.resize((out_px, out_px), Image.LANCZOS)
             buffer = BytesIO()
             crop.save(buffer, format="PNG")
-            offset_x = left + window_px / 2.0 - capture.size_px / 2.0
-            offset_y = top + window_px / 2.0 - capture.size_px / 2.0
+            offset_x = (left + half - width_px / 2.0) * image_px_to_map_px
+            offset_y = (top + half - height_px / 2.0) * image_px_to_map_px
             wx, wy = center_x + offset_x, center_y + offset_y
-            half = window_px / 2.0
             windows.append(
                 Capture(
                     center_lat=_px_to_lat(wy, world_px),
@@ -626,10 +714,10 @@ def _split_windows(capture: Capture) -> list[Capture]:
                     zoom=capture.zoom,
                     span_m=mpp * window_px,
                     size_px=window_px,
-                    south=_px_to_lat(wy + half, world_px),
-                    west=_px_to_lng(wx - half, world_px),
-                    north=_px_to_lat(wy - half, world_px),
-                    east=_px_to_lng(wx + half, world_px),
+                    south=_px_to_lat(wy + half_map, world_px),
+                    west=_px_to_lng(wx - half_map, world_px),
+                    north=_px_to_lat(wy - half_map, world_px),
+                    east=_px_to_lng(wx + half_map, world_px),
                     image_bytes=buffer.getvalue(),
                 )
             )
@@ -703,17 +791,23 @@ _RESPONSE_SCHEMA: dict[str, Any] = {
 
 # ── Appel Gemini : modèle image (limites dessinées en rouge) ──
 
-_GEMINI_IMAGE_PROMPT = """Cette image est une prise de vue satellite d'une zone agricole.
-Dessine en ROUGE vif, par-dessus la photo, le contour de CHAQUE parcelle agricole visible.
+_GEMINI_IMAGE_PROMPT = """Cette image est une prise de vue satellite à très haute résolution d'une zone agricole.
+Ta SEULE mission : tracer en ROUGE vif (#FF0000) les limites EXACTES de CHAQUE parcelle agricole VISIBLE dans CETTE ZONE, avec une précision au pixel près.
 
-- Suis les limites réelles : chemins de terre, diguettes, haies, fossés, canaux d'irrigation, bordures de cultures ou changements de texture de terre.
-- Trace aussi une ligne rouge ENTRE deux parcelles voisines mitoyennes, même si elles se ressemblent, de sorte que chaque parcelle forme une zone fermée séparée des autres.
-- Délimite aussi les parcelles qui touchent le bord de l'image.
-- N'oublie aucune parcelle, y compris les petites.
-- Ignore les routes goudronnées principales, les habitations et les mentions portées sur la carte.
+RÈGLES CRITIQUES POUR UNE PRÉCISION MAXIMALE :
+- EXHAUSTIF À 100 % : Détecte et trace TOUTES les parcelles agricoles visibles, sans exception. N'en oublie AUCUNE, y compris les plus petites, très étroites, irrégulières ou partiellement en bordure d'image. Si une parcelle est visible, elle DOIT être délimitée individuellement.
+- NE JAMAIS INVENTER : Ne trace AUCUNE limite qui n'est PAS réellement visible sur cette image. Ne devine pas de frontières entre zones uniformes. Ne trace que là où il existe une rupture PHYSIQUE visible (changement net de texture, de couleur, de couvert, ou élément linéaire naturel/artificiel comme fossé, diguette, chemin de terre).
+- SÉPARATION STRICTE : Chaque parcelle DOIT être tracée SÉPARÉMENT. Ne fusionne JAMAIS plusieurs parcelles en une seule. Trace un séparateur rouge CONTINU entre TOUTES les parcelles adjacentes mitoyennes, même si elles ont la même culture ou apparence.
+- ADHÉRENCE FIDÈLE AUX LIMITES : Suis EXACTEMENT les limites réelles visibles au pixel près. Les traits ne doivent NI déborder au-delà de la limite réelle visible, NI empiéter à l'intérieur d'une parcelle voisine. Évite tout lissage ou arrondi artificiel.
+- DISTINGUER CLAIREMENT LES PETITES PARCELLES : Porte une attention particulière aux petites parcelles très proches les unes des autres. Assure-toi qu'elles sont bien séparées individuellement et que leurs limites sont nettes et distinctes.
+- RÉSEAU CONTINU : Entre parcelles voisines, dessine une LIGNE ROUGE UNIQUE ET ININTERRUPTUE reliant systématiquement les limites existantes. Aux jonctions en T, en L ou en croix, prolonge OBLIGATOIREMENT le trait jusqu'à rejoindre un autre trait rouge existant. ZÉRO trou, ZÉRO interruption, ZÉRO espace.
+- TRAIT FIN : Utilise un trait rouge FIN, NET et continu. Préfère la précision et la continuité à l'épaisseur. Pas de pointillés, tirets ou traits fragmentés.
+- BORDS DE L'IMAGE : Délimite également les parcelles qui touchent ou coupent le bord de l'image (trace leur limite jusqu'au bord visible).
+- EXCLUSIONS : Ignore routes goudronnées principales, autoroutes, bâtiments, hangars, cours, mares, grands bois, zones urbaines, équipements, ombres seules sans rupture parcellaire. Ne trace que des unités agricoles exploitables clairement visibles.
+- AUCUNE MODIFICATION : Conserve EXACTEMENT le cadrage, l'orientation, la résolution et toutes les couleurs de la photo d'origine. SEULS les traits rouges (#FF0000) sont autorisés.
+- AUCUN TEXTE/SYMBOLE : N'ajoute aucun numéro, étiquette, légende, flèche, ombrage ou remplissage coloré.
 
-Ne modifie RIEN d'autre : conserve exactement le cadrage, l'orientation, la résolution et les couleurs de la photo d'origine. Les traits rouges sont la SEULE différence. N'ajoute aucun texte, aucune étiquette, aucun contour colorié autre qu'en rouge.
-Renvoie uniquement l'image ainsi annotée."""
+Résultat attendu : uniquement l'image annotée avec des traits rouges formant un réseau complet de limites individuelles, sans aucun oubli de parcelle, sans fusion, sans débordement, avec contours au plus près des limites réelles visibles. Renvoie UNIQUEMENT cette image."""
 
 
 def _gemini_image_mode() -> bool:
@@ -754,8 +848,31 @@ async def _post_gemini(
     return response
 
 
+def _preprocess_for_gemini_image(image_bytes: bytes) -> bytes:
+    """Prétraitement ultra-conservateur pour aider à mieux voir les limites déjà visibles.
+    
+    Unsharp mask très léger uniquement. Ne change ni cadrage, ni orientation, ni
+    résolution. N'invente aucune limite.
+    """
+    try:
+        from PIL import Image, ImageFilter
+        import io
+
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # Unsharp mask très léger : renforce uniquement les ruptures déjà visibles
+        enhanced = image.filter(ImageFilter.UnsharpMask(radius=0.8, percent=55, threshold=3))
+        buffer = io.BytesIO()
+        enhanced.save(buffer, format="PNG")
+        return buffer.getvalue()
+    except Exception:
+        # En cas d'échec, renvoyer l'image d'origine
+        return image_bytes
+
+
 async def _call_gemini_image(image_bytes: bytes, api_key: str) -> bytes:
     """Demande au modèle image de DESSINER les limites en rouge sur la capture."""
+    # Prétraitement ultra-conservateur pour mieux faire ressortir les limites visibles
+    image_bytes = _preprocess_for_gemini_image(image_bytes)
     model = (settings.gemini_image_model or "gemini-nano-banana-2.1").strip()
     url = GEMINI_ENDPOINT.format(model=model)
     payload = {
@@ -809,6 +926,39 @@ async def _call_gemini_image(image_bytes: bytes, api_key: str) -> bytes:
         "Le modèle image Gemini n'a renvoyé aucune image"
         + (f" (fin : {finish})." if finish else ".")
     )
+
+
+async def _analyze_windows(
+    windows: list[Capture], gemini_key: str
+) -> tuple[list[dict[str, Any]], list[Capture], list[Exception]]:
+    """Analyse chaque fenêtre (quatre appels à la fois) et recolle les contours.
+
+    Retourne les contours bruts, la fenêtre d'origine de chacun et les fenêtres
+    en échec : une fenêtre perdue n'empêche pas de récupérer les autres.
+    """
+    if len(windows) == 1:
+        rings = await _window_rings(windows[0], gemini_key)
+        return rings, [windows[0]] * len(rings), []
+
+    semaphore = asyncio.Semaphore(MAX_PARALLEL_GEMINI_CALLS)
+
+    async def analyze(window: Capture) -> list[dict[str, Any]]:
+        async with semaphore:
+            return await _window_rings(window, gemini_key)
+
+    results = await asyncio.gather(*(analyze(window) for window in windows), return_exceptions=True)
+    failed = [result for result in results if isinstance(result, Exception)]
+    if len(failed) == len(results):
+        raise failed[0]
+    raw_parcels: list[dict[str, Any]] = []
+    raw_windows: list[Capture] = []
+    for window, result in zip(windows, results):
+        if isinstance(result, Exception):
+            logger.warning("gemini-parcels : fenêtre en échec : %s", result)
+            continue
+        raw_parcels.extend(result)
+        raw_windows.extend([window] * len(result))
+    return raw_parcels, raw_windows, failed
 
 
 async def _window_rings(window: Capture, gemini_key: str) -> list[dict[str, Any]]:
@@ -1022,9 +1172,11 @@ def _candidate_from_ring(
     if area_m2 < MIN_AREA_HA * 10_000:
         return None
     # Un contour qui couvre presque toute l'image est une erreur de segmentation.
+    # L'échelle est celle de l'image réellement analysée (une fenêtre peut être
+    # suréchantillonnée) : `span_m / largeur_px`, et non le mètre par pixel du zoom.
     img_w_px = capture.width_px or capture.size_px
     img_h_px = capture.height_px or capture.size_px
-    mpp = _meters_per_pixel(origin.center_lat, capture.zoom)
+    mpp = capture.span_m / max(1, img_w_px, img_h_px)
     max_area_m2 = (img_w_px * mpp) * (img_h_px * mpp) * 0.98
     if area_m2 > max_area_m2:
         return None
@@ -1065,13 +1217,36 @@ def _iou(a: Polygon, b: Polygon) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def _bounds_gap(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    """Distance (m) entre deux boîtes englobantes, 0 quand elles se touchent."""
+    dx = max(a[0] - b[2], b[0] - a[2], 0.0)
+    dy = max(a[1] - b[3], b[1] - a[3], 0.0)
+    return math.hypot(dx, dy)
+
+
 def _same_candidate(a: Candidate, b: Candidate) -> bool:
-    """Deux contours de la même réponse Gemini qui désignent le même champ."""
+    """Deux contours de la même réponse Gemini qui désignent le même champ.
+
+    Les fenêtres d'analyse se chevauchent : une parcelle entière dans le
+    chevauchement est tracée deux fois. Comme les deux tracés ne coïncident pas
+    au pixel près, l'IoU seul ne suffit pas — un recouvrement d'au moins la
+    moitié de la plus petite des deux surfaces désigne la même parcelle. Sans
+    cela, les deux contours seraient enregistrés l'un sur l'autre.
+    """
+    if _bounds_gap(a.geom.bounds, b.geom.bounds) > 10.0:
+        return False
     if _iou(a.geom, b.geom) >= CANDIDATE_IOU_THRESHOLD:
         return True
     distance = math.hypot(a.geom.centroid.x - b.geom.centroid.x, a.geom.centroid.y - b.geom.centroid.y)
     ratio = min(a.geom.area, b.geom.area) / max(a.geom.area, b.geom.area)
-    return distance <= 5.0 and ratio >= 0.6
+    if distance <= 5.0 and ratio >= 0.6:
+        return True
+    if a.geom.disjoint(b.geom):
+        return False
+    smaller = min(a.geom.area, b.geom.area)
+    if smaller <= 0:
+        return False
+    return a.geom.intersection(b.geom).area / smaller >= CANDIDATE_OVERLAP_THRESHOLD
 
 
 # ── Rapprochement avec les parcelles déjà en base ──
@@ -1126,6 +1301,19 @@ def _existing_parcels(rows: list[Parcelle], capture: Capture) -> list[ExistingPa
 
 
 def _match_existing(candidate: Candidate, existing: list[ExistingParcel], tree: STRtree | None) -> ExistingParcel | None:
+    """Parcelle en base que ce contour ne fait que retracer, s'il y en a une.
+
+    Un contour qui recoupe une parcelle déjà délimitée n'est jamais enregistré :
+    la délimitation existante fait foi (ses limites ne sont ni remplacées ni
+    ajustées). Trois critères, du plus strict au plus large :
+
+    1. IoU élevé — même parcelle à quelques mètres près ;
+    2. même centre et surface comparable — l'IoU chute quand les deux tracés
+       diffèrent de forme ;
+    3. recouvrement — la part du contour couverte par les parcelles en base
+       (fusion d'une existante avec une voisine) ou la part d'une parcelle en
+       base que le contour écrase (gros polygone contenant une petite parcelle).
+    """
     if not existing:
         return None
     indexes = (
@@ -1133,6 +1321,7 @@ def _match_existing(candidate: Candidate, existing: list[ExistingParcel], tree: 
         if tree is not None
         else range(len(existing))
     )
+    overlaps: list[tuple[float, ExistingParcel]] = []
     for index in indexes:
         item = existing[index]
         if _iou(candidate.geom, item.geom) >= EXISTING_IOU_THRESHOLD:
@@ -1145,7 +1334,23 @@ def _match_existing(candidate: Candidate, existing: list[ExistingParcel], tree: 
         tolerance = max(8.0, min(25.0, math.sqrt(max(candidate.geom.area, item.geom.area)) * 0.25))
         if ratio >= EXISTING_AREA_RATIO and distance <= tolerance:
             return item
-    return None
+        if item.geom.area <= 0 or candidate.geom.disjoint(item.geom):
+            continue
+        intersection = candidate.geom.intersection(item.geom).area
+        if intersection <= 0:
+            continue
+        if intersection / item.geom.area >= EXISTING_CONTAINED_THRESHOLD:
+            # Le contour reprend l'essentiel de cette parcelle : elle est déjà délimitée.
+            return item
+        overlaps.append((intersection, item))
+
+    if not overlaps:
+        return None
+    # Part du contour couverte par l'ensemble des parcelles en base qu'il recoupe.
+    covered = unary_union([item.geom for _, item in overlaps]).intersection(candidate.geom).area
+    if candidate.geom.area <= 0 or covered / candidate.geom.area < EXISTING_COVERAGE_THRESHOLD:
+        return None
+    return max(overlaps, key=lambda pair: pair[0])[1]
 
 
 # ── Enregistrement ──
@@ -1252,7 +1457,12 @@ async def detect_parcels_gemini(
     viewport_height: int | None = None,
     bounds: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Capture satellite → détection Gemini → validation → déduplication → base."""
+    """Capture satellite → détection Gemini par fenêtres → validation → base.
+
+    Chaque fenêtre est géoréférencée et analysée séparément ; les contours sont
+    ensuite recollés, les doublons entre fenêtres éliminés et les parcelles déjà
+    délimitées écartées.
+    """
     gemini_key = (settings.gemini_api_key or "").strip()
     maps_key = (settings.google_maps_api_key or "").strip()
     if not gemini_key and not maps_key:
@@ -1284,10 +1494,6 @@ async def detect_parcels_gemini(
             maps_key=maps_key,
             bounds=bounds,
         )
-        raw_parcels = await _window_rings(capture, gemini_key)
-        raw_windows = [capture] * len(raw_parcels)
-        windows = [capture]
-        failed_windows = []
     else:
         requested_span = max(MIN_CAPTURE_SPAN_M, min(MAX_CAPTURE_SPAN_M, float(span_m)))
         requested_tile = (
@@ -1304,30 +1510,26 @@ async def detect_parcels_gemini(
         else:
             capture = await _capture_satellite(latitude, longitude, requested_span, zoom, maps_key)
 
-        windows = _split_windows(capture)
-        semaphore = asyncio.Semaphore(MAX_PARALLEL_GEMINI_CALLS)
-
-        async def analyze(window: Capture) -> list[dict[str, Any]]:
-            async with semaphore:
-                return await _window_rings(window, gemini_key)
-
-        results = await asyncio.gather(*(analyze(w) for w in windows), return_exceptions=True)
-        failed_windows = [r for r in results if isinstance(r, Exception)]
-        if len(failed_windows) == len(results):
-            raise failed_windows[0]
-
-        raw_parcels = []
-        raw_windows = []
-        for window, result in zip(windows, results):
-            if isinstance(result, Exception):
-                logger.warning("gemini-parcels : fenêtre en échec : %s", result)
-                continue
-            raw_parcels.extend(result)
-            raw_windows.extend([window] * len(result))
+    # Fenêtres haute résolution : la capture d'écran est découpée comme les
+    # mosaïques, ce qui divise le mètre par pixel du tracé du modèle.
+    windows = _split_windows(capture)
+    raw_parcels, raw_windows, failed_windows = await _analyze_windows(windows, gemini_key)
 
     rejected = 0
     candidates: list[Candidate] = []
     split = len(windows) > 1
+    if split:
+        # Fenêtres internes chevauchantes : la fenêtre voisine voit entière la
+        # parcelle coupée par ce bord, donc celle-ci n'est pas perdue.
+        edge_margin = WINDOW_EDGE_MARGIN
+    elif _gemini_image_mode():
+        # Mode image : `parcel_rings_from_red_lines` écarte déjà les zones qui
+        # atteignent le bord de la capture (aucun anneau ne le touche).
+        edge_margin = 0.0
+    else:
+        # Mode texte sur une capture entière : ne garder que les parcelles
+        # entièrement visibles.
+        edge_margin = CAPTURE_EDGE_MARGIN
     for item, window in list(zip(raw_parcels, raw_windows))[: MAX_DETECTED_PARCELS * 2]:
         if not isinstance(item, dict):
             rejected += 1
@@ -1338,7 +1540,7 @@ async def detect_parcels_gemini(
             confidence=item.get("confidence"),
             label=item.get("label"),
             frame=capture,
-            edge_margin=WINDOW_EDGE_MARGIN if split else 0.0,
+            edge_margin=edge_margin,
         )
         if candidate is None:
             rejected += 1

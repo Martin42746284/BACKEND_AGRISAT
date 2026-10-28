@@ -27,6 +27,10 @@ from app.services.gemini_parcels_image import (  # noqa: E402
 )
 
 SIZE = 512
+# Marge de fond autour de la grille : les cellules de bord sont alors entièrement
+# visibles. Une cellule coupée par le bord n'est volontairement pas tracée (voir
+# `test_parcel_cut_by_the_border_is_not_traced`).
+MARGIN = 12
 BACKGROUND = (120, 130, 90)
 FIELD_COLORS = [(110, 140, 70), (150, 120, 80), (90, 150, 100), (170, 160, 110)]
 RED = (230, 20, 20)
@@ -48,23 +52,24 @@ def _grid_image(
     """Mosaïque de `columns` x `rows` champs séparés par des limites rouges."""
     image = Image.new("RGB", (SIZE, SIZE), BACKGROUND)
     draw = ImageDraw.Draw(image)
-    cell_w = SIZE // columns
-    cell_h = SIZE // rows
+    inner = SIZE - 2 * MARGIN
+    cell_w = inner // columns
+    cell_h = inner // rows
     for row in range(rows):
         for column in range(columns):
             box = (
-                column * cell_w + line_px,
-                row * cell_h + line_px,
-                (column + 1) * cell_w - line_px,
-                (row + 1) * cell_h - line_px,
+                MARGIN + column * cell_w + line_px,
+                MARGIN + row * cell_h + line_px,
+                MARGIN + (column + 1) * cell_w - line_px,
+                MARGIN + (row + 1) * cell_h - line_px,
             )
             draw.rectangle(box, fill=FIELD_COLORS[(row * columns + column) % len(FIELD_COLORS)])
     for column in range(columns + 1):
-        x = min(SIZE - line_px, column * cell_w)
-        draw.rectangle((x, 0, x + line_px - 1, SIZE), fill=RED)
+        x = MARGIN + min(inner - line_px, column * cell_w)
+        draw.rectangle((x, MARGIN, x + line_px - 1, SIZE - MARGIN - 1), fill=RED)
     for row in range(rows + 1):
-        y = min(SIZE - line_px, row * cell_h)
-        draw.rectangle((0, y, SIZE, y + line_px - 1), fill=RED)
+        y = MARGIN + min(inner - line_px, row * cell_h)
+        draw.rectangle((MARGIN, y, SIZE - MARGIN - 1, y + line_px - 1), fill=RED)
     if stray_blob:
         # Tache rouge compacte au milieu d'un champ : le modèle en laisse parfois.
         center = (cell_w + cell_w // 2, cell_h + cell_h // 2)
@@ -98,7 +103,7 @@ def test_red_mask_selects_only_the_drawn_lines():
     # Un champ vert/beige n'est jamais « rouge » au sens du masque.
     assert not mask[64:120, 64:120].any()
     # La limite en est bien.
-    assert mask[:, 0:3].any()
+    assert mask[:, MARGIN:MARGIN + 3].any()
 
 
 def test_grid_yields_one_parcel_per_cell():
@@ -134,10 +139,10 @@ def _grid_with_gap(gap_px: int, columns: int = 4, rows: int = 4) -> Image.Image:
     """
     image = _grid_image(columns=columns, rows=rows)
     draw = ImageDraw.Draw(image)
-    cell_w = SIZE // columns
-    cell_h = SIZE // rows
-    x = cell_w  # limite verticale entre la colonne 0 et la colonne 1
-    top = cell_h + 20  # franchement sous la première limite horizontale
+    cell_w = (SIZE - 2 * MARGIN) // columns
+    cell_h = (SIZE - 2 * MARGIN) // rows
+    x = MARGIN + cell_w  # limite verticale entre la colonne 0 et la colonne 1
+    top = MARGIN + cell_h + 20  # franchement sous la première limite horizontale
     draw.rectangle((x, top, x + 2, top + gap_px - 1), fill=FIELD_COLORS[0])
     return image
 
@@ -208,6 +213,38 @@ def test_border_background_is_dropped_but_cells_are_kept():
 
     assert len(rings) == 1
     assert _ring_centers(rings)[0] == (pytest.approx(0.5, abs=0.05), pytest.approx(0.5, abs=0.05))
+
+
+def _cut_field() -> Image.Image:
+    """Une parcelle entière et une parcelle coupée par le bord droit."""
+    image = Image.new("RGB", (SIZE, SIZE), BACKGROUND)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((60, 60, 220, 220), outline=RED, width=4)
+    # Parcelle dont la limite droite est hors champ : trois côtés seulement.
+    draw.line([(320, 60), (SIZE - 1, 60)], fill=RED, width=4)
+    draw.line([(320, 220), (SIZE - 1, 220)], fill=RED, width=4)
+    draw.line([(320, 60), (320, 220)], fill=RED, width=4)
+    return image
+
+
+def test_parcel_cut_by_the_border_is_not_traced():
+    rings = parcel_rings_from_red_lines(_png(_cut_field()))
+
+    # Seule la parcelle entièrement visible est reconstruite.
+    assert len(rings) == 1
+    assert _ring_centers(rings)[0] == (pytest.approx(0.27, abs=0.05), pytest.approx(0.27, abs=0.05))
+    for point in rings[0]:
+        assert 0.0 < point["x"] < 1.0
+        assert 0.0 < point["y"] < 1.0
+
+
+def test_parcel_closed_on_the_border_is_not_traced():
+    # Le modèle peut refermer une parcelle coupée en dessinant un trait le long
+    # du bord : le contour arriverait pile sur le bord, il est écarté aussi.
+    image = Image.new("RGB", (SIZE, SIZE), BACKGROUND)
+    ImageDraw.Draw(image).rectangle((2, 2, SIZE - 3, SIZE - 3), outline=RED, width=4)
+
+    assert parcel_rings_from_red_lines(_png(image)) == []
 
 
 def test_framing_warning_flags_aspect_change():

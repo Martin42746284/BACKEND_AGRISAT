@@ -238,15 +238,12 @@ async def _save_simple_field_parcelle(feature: dict[str, Any]) -> None:
     async with async_session_maker() as session:
         existing = (await session.execute(select(Parcelle).where(Parcelle.label == label))).scalars().first()
         if existing is not None and row_has_analysis(existing):
-            # Parcelle déjà analysée : les données enregistrées ne bougent plus.
+            # Parcelle déjà analysée avec ce même label : les données enregistrées ne bougent plus.
             logger.info("Parcelle %s déjà analysée : enregistrement ignoré.", label)
             return
-        # La même parcelle tracée deux fois a un centroïde légèrement différent :
-        # on cherche aussi une ligne déjà analysée à proximité.
-        nearby = await find_analyzed_parcel_in_session(session, center["lat"], center["lng"])
-        if nearby is not None:
-            logger.info("Parcelle déjà analysée (%s) : enregistrement ignoré.", nearby.label)
-            return
+        # Ne jamais bloquer la sauvegarde d'une parcelle classifiée par simple proximité
+        # d'une autre parcelle déjà analysée. Seul un conflit sur la MÊME parcelle
+        # (même label) doit empêcher la réécriture.
         if existing:
             for key, value in values.items():
                 setattr(existing, key, value)
