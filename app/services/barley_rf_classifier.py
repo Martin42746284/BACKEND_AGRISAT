@@ -32,6 +32,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from app.services.orge_scoring import is_barley_confirmed
+
 logger = logging.getLogger("agrisat.services.barley_rf_classifier")
 
 MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "models" / "orge_rf"
@@ -39,11 +41,8 @@ MODEL_PATH = MODEL_DIR / "orge_rf.joblib"
 METRICS_PATH = MODEL_DIR / "metrics.json"
 THRESHOLD_PATH = MODEL_DIR / "threshold_selection.json"
 
-#: verdict à trois niveaux de predict_orge.py (projet Orge)
-AUTO_ORGE_THRESHOLD = 0.70
+#: seuil de rejet historique, utilisé seulement quand aucun seuil de modèle n'est fourni
 REJECT_THRESHOLD = 0.15
-MAX_OCT_NDVI = 0.50
-MAX_DOY_PEAK = 245
 
 #: en dessous : pas de verdict parcelle (série inexploitable)
 MIN_VALID_OBSERVATIONS = 1
@@ -227,13 +226,21 @@ def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
     return rows[features].astype(float).fillna(0.0)
 
 
-def _verdict(probability: float, ndvi_oct: float, doy_peak: float) -> str:
-    """Verdict à trois niveaux de predict_orge.py, appliqué au niveau parcelle."""
-    if probability < REJECT_THRESHOLD:
+def _verdict(
+    probability: float,
+    ndvi_oct: float | None = None,
+    doy_peak: float | None = None,
+    threshold: float = REJECT_THRESHOLD,
+) -> str:
+    """Verdict parcelle : rejet sous le seuil du modèle, puis score final +5 / >65 %.
+
+    `ndvi_oct` et `doy_peak` restent acceptés pour compatibilité avec l'ancien
+    verdict à trois niveaux, mais ne conditionnent plus la confirmation : seules
+    les nouvelles règles de score (voir `orge_scoring`) décident ORGE / À VÉRIFIER.
+    """
+    if probability < threshold:
         return "NON_ORGE"
-    if probability >= AUTO_ORGE_THRESHOLD and ndvi_oct <= MAX_OCT_NDVI and doy_peak <= MAX_DOY_PEAK:
-        return "ORGE"
-    return "A_VERIFIER"
+    return "ORGE" if is_barley_confirmed(probability * 100) else "A_VERIFIER"
 
 
 def classify(series: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -255,7 +262,7 @@ def classify(series: list[dict[str, Any]]) -> dict[str, Any] | None:
         "probability": probability,
         "is_barley": probability >= threshold,
         "threshold": threshold,
-        "verdict": _verdict(probability, ndvi_oct, doy_peak),
+        "verdict": _verdict(probability, ndvi_oct, doy_peak, threshold),
         "n_features": len(model["features"]),
         "n_observations": int(len(features)),
         "ndvi_oct": round(ndvi_oct, 4),

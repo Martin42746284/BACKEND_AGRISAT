@@ -4,6 +4,7 @@ from app.routes import (
     analyze_parcel,
     analyze_simple,
     audit,
+    bornes_gps,
     detect_parcels,
     field_segmentation,
     gemini_parcels,
@@ -23,6 +24,7 @@ api_router.include_router(modeles.router)
 
 api_router.include_router(planet.router)
 api_router.include_router(parcelles.router)
+api_router.include_router(bornes_gps.router)
 api_router.include_router(analyze_parcel.router)
 api_router.include_router(zoning.router)
 api_router.include_router(detect_parcels.router)

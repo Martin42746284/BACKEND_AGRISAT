@@ -257,6 +257,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 3001
 | `GET`     | `/api/parcelles`                      | Liste les parcelles enregistrées (avec cache court)                      |
 | `POST`    | `/api/parcelles`                      | Crée une parcelle                                                        |
 | `DELETE`  | `/api/parcelles/:id`                  | Supprime une parcelle                                                    |
+| `GET`     | `/api/bornes-gps`                     | Liste les bornes GPS (filtre optionnel `?q=nom`)                         |
+| `POST`    | `/api/bornes-gps`                     | Enregistre une borne GPS nommée                                          |
+| `PATCH`   | `/api/bornes-gps/:id`                 | Renomme une borne GPS                                                    |
+| `DELETE`  | `/api/bornes-gps/:id`                 | Supprime une borne GPS                                                   |
 | `POST`    | `/api/detect-parcels`                 | Détection automatique de parcelles autour d'un point (avec repli si la base est indisponible) |
 | `POST`    | `/api/detect-parcels-fallback`        | Détection automatique de parcelles (variante sans repli)                 |
 | `POST`    | `/api/analyze-parcel`                 | Analyse détaillée d'une parcelle (indices spectraux, séries temporelles) |
@@ -278,7 +282,7 @@ AGRISAT-BACKEND/
 │   ├── main.py                   # Point d'entrée FastAPI, CORS, handlers d'erreur, lifespan
 │   ├── config.py                 # Variables d'environnement (pydantic-settings)
 │   ├── db.py                     # Moteur SQLAlchemy async
-│   ├── models.py                 # Modèles SQLAlchemy (Parcelle, FieldScanRun, VhrRefinement)
+│   ├── models.py                 # Modèles SQLAlchemy (Parcelle, BorneGps, FieldScanRun, VhrRefinement)
 │   ├── schemas.py                # Schémas Pydantic (validation des requêtes)
 │   ├── errors.py                 # Gestion d'erreurs centralisée
 │   ├── cache.py                  # Cache TTL des parcelles

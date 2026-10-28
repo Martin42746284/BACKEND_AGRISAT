@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from app.services.barley_rf_classifier import _verdict, build_features, classify
+from app.services.orge_scoring import final_barley_score, is_barley_confirmed
 
 
 def _series() -> list[dict[str, float | str | None]]:
@@ -52,7 +53,7 @@ def test_features_have_model_shape_and_no_nan():
     features = build_features(_series())
 
     assert features is not None
-    assert features.shape == (12, 48)
+    assert features.shape == (12, 64)
     assert not features.isna().any().any()
 
 
@@ -61,8 +62,8 @@ def test_classify_returns_parcel_probability():
 
     assert result is not None
     assert 0.0 <= result["probability"] <= 1.0
-    assert result["threshold"] == pytest.approx(0.3268)
-    assert result["n_features"] == 48
+    assert result["threshold"] == pytest.approx(0.2892)
+    assert result["n_features"] == 64
     assert result["n_observations"] == 12
     assert result["verdict"] in {"ORGE", "A_VERIFIER", "NON_ORGE"}
     assert result["model_version"].startswith("orge_rf")
@@ -94,10 +95,53 @@ def test_model_artifacts_are_valid_json():
 
     assert bundle is not None
     assert bundle["metrics"].get("generated_at")
-    assert bundle["threshold"] == pytest.approx(0.3268)
+    assert bundle["threshold"] == pytest.approx(0.2892)
 
 
-def test_three_level_verdict():
+def test_final_barley_score_examples():
+    """Règle utilisateur : +5 points sous 70 %, puis confirmation si >65 %."""
+    assert final_barley_score(56) == pytest.approx(61)
+    assert final_barley_score(62) == pytest.approx(67)
+    assert final_barley_score(69) == pytest.approx(74)
+    assert final_barley_score(75) == pytest.approx(75)
+    assert final_barley_score(70) == pytest.approx(70)
+    assert final_barley_score(100) == pytest.approx(100)
+
+    assert not is_barley_confirmed(56)  # 61 <= 65
+    assert is_barley_confirmed(62)      # 67 > 65
+    assert is_barley_confirmed(69)      # 74 > 65
+    assert is_barley_confirmed(75)      # 75 > 65
+    assert not is_barley_confirmed(60)  # 65 n'est pas > 65
+    assert is_barley_confirmed(65)      # 70 > 65
+
+
+def test_verdict_uses_final_score_only():
+    # Les anciens garde-fous agro (NDVI d'octobre, date du pic) ne bloquent plus la confirmation.
     assert _verdict(0.90, ndvi_oct=0.20, doy_peak=210) == "ORGE"
-    assert _verdict(0.90, ndvi_oct=0.80, doy_peak=210) == "A_VERIFIER"
+    assert _verdict(0.90, ndvi_oct=0.80, doy_peak=210) == "ORGE"
+    assert _verdict(0.62, ndvi_oct=0.80, doy_peak=300) == "ORGE"   # 67 > 65
+    assert _verdict(0.60, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 65 <= 65
+    assert _verdict(0.56, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 61 <= 65
     assert _verdict(0.05, ndvi_oct=0.20, doy_peak=210) == "NON_ORGE"
+
+    # Le seuil NON-ORGE du modèle reste celui du RF (et non l'ancien 0.15).
+    assert _verdict(0.30, threshold=0.2892) == "A_VERIFIER"
+    assert _verdict(0.28, threshold=0.2892) == "NON_ORGE"
+
+
+def test_verdict_from_rf_applies_final_score():
+    from app.services.analyze_parcel import verdict_from_rf
+
+    for initial, final, confirmed in ((56, 61, False), (62, 67, True), (69, 74, True), (75, 75, True)):
+        result = verdict_from_rf({"probability": initial / 100, "is_barley": True, "threshold": 0.2892})
+        assert result["hybrid_score"] == final
+        assert result["final_confirmed"] is confirmed
+        assert result["final_confidence"] == final
+        assert f"score final {final}%" in result["final_verdict"]
+
+    # NON-ORGE : le bonus ne touche pas la confiance de classe (1 - probabilité d'orge).
+    non_orge = verdict_from_rf({"probability": 0.23, "is_barley": False, "threshold": 0.2892})
+    assert non_orge["hybrid_score"] == 23
+    assert non_orge["final_confirmed"] is False
+    assert non_orge["final_confidence"] == 77
+    assert "score final" not in non_orge["final_verdict"]

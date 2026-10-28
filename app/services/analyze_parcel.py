@@ -43,6 +43,7 @@ from app.services.barley_rf_classifier import classify as classify_barley_rf
 from app.services.barley_s2_classifier import classify as classify_barley_s2
 from app.services.barley_rf_classifier import load_model as load_barley_rf
 from app.services.field_watershed import lng_lat_to_mercator_meters
+from app.services.orge_scoring import final_barley_score, is_barley_confirmed
 # s2_time_series importe les primitives GEE de ce module : import paresseux dans
 # analyze_parcel() pour éviter l'import circulaire (comme zoning.py / automatic_parcels.py).
 
@@ -1020,37 +1021,59 @@ def compute_agro_score(sat_data: dict[str, Any], planting: dict[str, Any], time_
 
 def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score: float) -> dict[str, Any]:
     cnn_score = cnn_confidence if cnn_is_barley else (100 - cnn_confidence)
-    hybrid_score = js_round(cnn_score * 0.6 + agro_score * 0.4)
+    raw_score = js_round(cnn_score * 0.6 + agro_score * 0.4)
 
     disagreement = abs(cnn_score - agro_score)
     penalty = disagreement * 0.08 if disagreement > 55 else 0
-    final_confidence = max(0, min(100, js_round(hybrid_score - penalty)))
 
-    # Seulement deux catégories : ORGE CONFIRMÉ vs NON-ORGE. Seuil à 50% (corrigé lors de
-    # l'audit du portage Python — le code source TS portait `> 44` mais son propre
-    # commentaire documentait l'intention `> 50` : "Remonté à 50% (depuis 43%)... 50% exige
-    # une vraie majorité"; décision utilisateur du 2026-09-04 de suivre l'intention
-    # documentée). Un score Agro élevé (souvent 70-95%, ses composantes retombant sur des
-    # valeurs neutres généreuses quand une donnée manque) suffisait seul à faire basculer en
-    # orge même quand le CNN penchait pour non-orge — 50% exige une vraie majorité CNN+Agro
-    # en faveur de l'orge.
-    final_is_barley = hybrid_score > 50
+    # Le score d'orge final suit la règle +5 sous 70 % / >65 % (orge_scoring.py).
+    # Le seuil NON-ORGE existant (>50 %) est conservé.
+    final_is_barley = raw_score > 50
+    final_score = js_round(final_barley_score(raw_score)) if final_is_barley else raw_score
+    final_confirmed = final_is_barley and final_score > 65
+    final_confidence = max(0, min(100, js_round(final_score - penalty)))
 
-    verdict = "✅ ORGE CONFIRMÉE — CNN + Règles agro concordent" if final_is_barley else "❌ NON-ORGE — CNN + Règles agro concordent"
+    if final_confirmed:
+        verdict = f"✅ ORGE CONFIRMÉE — CNN + Règles agro concordent (score final {final_score}%)"
+    elif final_is_barley:
+        verdict = f"⚠️ ORGE À VÉRIFIER — CNN + Règles agro concordent (score final {final_score}%)"
+    else:
+        verdict = f"❌ NON-ORGE — CNN + Règles agro concordent (score {raw_score}%)"
     if disagreement > 55:
         verdict += f" (⚠️ désaccord CNN/Agro: {disagreement:.0f}%)"
 
-    return {"hybrid_score": hybrid_score, "final_is_barley": final_is_barley, "final_verdict": verdict, "final_confidence": final_confidence}
+    return {
+        "hybrid_score": final_score,
+        "final_is_barley": final_is_barley,
+        "final_confirmed": final_confirmed,
+        "final_verdict": verdict,
+        "final_confidence": final_confidence,
+    }
 
 
 def create_agro_only_hybrid_score(agro_score: float) -> dict[str, Any]:
     final_is_barley = agro_score > 50
-    verdict = (
-        f"⚠️ ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
-        if final_is_barley
-        else f"⚠️ NON-ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
-    )
-    return {"hybrid_score": agro_score, "final_is_barley": final_is_barley, "final_verdict": verdict, "final_confidence": agro_score}
+    final_score = js_round(final_barley_score(agro_score)) if final_is_barley else agro_score
+    final_confirmed = final_is_barley and final_score > 65
+    if final_confirmed:
+        verdict = (
+            f"✅ ORGE CONFIRMÉE (CNN indisponible, estimation agro seule) — "
+            f"Score agro {agro_score}% → score final {final_score}%"
+        )
+    elif final_is_barley:
+        verdict = (
+            f"⚠️ ORGE À VÉRIFIER (CNN indisponible, estimation agro seule) — "
+            f"Score agro {agro_score}% → score final {final_score}%"
+        )
+    else:
+        verdict = f"⚠️ NON-ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
+    return {
+        "hybrid_score": final_score,
+        "final_is_barley": final_is_barley,
+        "final_confirmed": final_confirmed,
+        "final_verdict": verdict,
+        "final_confidence": final_score,
+    }
 
 
 # ── Season detection ──
@@ -1121,21 +1144,26 @@ def rf_calibration_note() -> str:
 
 def verdict_from_rf(rf: dict[str, Any]) -> dict[str, Any]:
     """Même forme que verdict_from_s2, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte la probabilité d'orge du RF saisonnier."""
+    hybrid_score porte le score final d'orge (probabilité RF +5 points sous 70 %)."""
     probability = rf["probability"]
     pct = js_round(probability * 100)
-    level = rf.get("verdict")
     if not rf["is_barley"]:
+        final_score = pct
+        final_confirmed = False
         verdict = f"❌ NON-ORGE — RF Orge (probabilité d'orge {pct}%)"
-    elif level == "ORGE":
-        verdict = f"✅ ORGE CONFIRMÉE — RF Orge (probabilité d'orge {pct}%)"
+        final_confidence = js_round(max(probability, 1 - probability) * 100)
     else:
-        verdict = f"⚠️ ORGE À VÉRIFIER — RF Orge (probabilité d'orge {pct}%)"
+        final_score = js_round(final_barley_score(pct))
+        final_confirmed = is_barley_confirmed(pct)
+        label = "✅ ORGE CONFIRMÉE" if final_confirmed else "⚠️ ORGE À VÉRIFIER"
+        verdict = f"{label} — RF Orge (probabilité d'orge {pct}% → score final {final_score}%)"
+        final_confidence = final_score
     return {
-        "hybrid_score": pct,
+        "hybrid_score": final_score,
         "final_is_barley": rf["is_barley"],
+        "final_confirmed": final_confirmed,
         "final_verdict": verdict,
-        "final_confidence": js_round(max(probability, 1 - probability) * 100),
+        "final_confidence": final_confidence,
     }
 
 
@@ -1155,8 +1183,8 @@ def _rf_barley_segment(polygon: list[LatLng], rf: dict[str, Any], ndvi_percentag
 
 # ── Verdict par le classifieur Sentinel-2 (app/services/barley_s2_classifier.py) ──
 
-# Repère, dans data_source, les analyses dont hybrid_score porte la probabilité d'orge
-# Sentinel-2 (et non plus 0,6 × CNN + 0,4 × agro) : le frontend adapte son libellé.
+# Repère, dans data_source, les analyses dont hybrid_score porte le score final d'orge
+# dérivé de Sentinel-2 (et non plus 0,6 × CNN + 0,4 × agro) : le frontend adapte son libellé.
 S2_CLASSIFIER_SOURCE = "Classifieur orge Sentinel-2"
 
 
@@ -1173,19 +1201,26 @@ def s2_calibration_note(s2: dict[str, Any]) -> str:
 
 def verdict_from_s2(s2: dict[str, Any]) -> dict[str, Any]:
     """Même forme que compute_hybrid_score, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte désormais la probabilité d'orge Sentinel-2."""
+    hybrid_score porte le score final d'orge (probabilité S2 +5 points sous 70 %)."""
     probability = s2["probability"]
     pct = js_round(probability * 100)
-    verdict = (
-        f"✅ ORGE CONFIRMÉE — Sentinel-2 (probabilité d'orge {pct}%)"
-        if s2["is_barley"]
-        else f"❌ NON-ORGE — Sentinel-2 (probabilité d'orge {pct}%)"
-    )
+    if not s2["is_barley"]:
+        final_score = pct
+        final_confirmed = False
+        verdict = f"❌ NON-ORGE — Sentinel-2 (probabilité d'orge {pct}%)"
+        final_confidence = js_round(max(probability, 1 - probability) * 100)
+    else:
+        final_score = js_round(final_barley_score(pct))
+        final_confirmed = is_barley_confirmed(pct)
+        label = "✅ ORGE CONFIRMÉE" if final_confirmed else "⚠️ ORGE À VÉRIFIER"
+        verdict = f"{label} — Sentinel-2 (probabilité d'orge {pct}% → score final {final_score}%)"
+        final_confidence = final_score
     return {
-        "hybrid_score": pct,
+        "hybrid_score": final_score,
         "final_is_barley": s2["is_barley"],
+        "final_confirmed": final_confirmed,
         "final_verdict": verdict,
-        "final_confidence": js_round(max(probability, 1 - probability) * 100),
+        "final_confidence": final_confidence,
     }
 
 
@@ -1370,13 +1405,13 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             )
         elif hf_result:
             recommendations = (
-                f"Orge {'confirmée' if hybrid['final_confidence'] > 70 else 'probable'}. Score hybride {hybrid['hybrid_score']}% (CNN {js_round(hf_result['confidence'])}% + Agro {agro['score']}%)."
+                f"Orge {'confirmée' if hybrid['final_confirmed'] else 'à vérifier'}. Score final {hybrid['hybrid_score']}% (CNN {js_round(hf_result['confidence'])}% + Agro {agro['score']}%)."
                 if hybrid["final_is_barley"]
                 else f"Non-orge détecté. Score hybride {hybrid['hybrid_score']}%. Vérification terrain recommandée."
             )
         else:
             recommendations = (
-                f"{'Orge probable' if hybrid['final_is_barley'] else 'Non-orge probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score {agro['score']}%). Vérification terrain recommandée."
+                f"{'Orge confirmée' if hybrid['final_confirmed'] else 'Orge à vérifier' if hybrid['final_is_barley'] else 'Non-orge probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score final {hybrid['hybrid_score']}%). Vérification terrain recommandée."
             )
 
         response = {

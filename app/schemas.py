@@ -249,6 +249,38 @@ class ParcelleUpdate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class BorneGpsCreate(BaseModel):
+    """Borne GPS placée sur la carte."""
+
+    name: str = Field(min_length=1, max_length=120)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+    _v = field_validator("lat", "lng")(_finite)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("ne doit pas être vide")
+        return name
+
+
+class BorneGpsUpdate(BaseModel):
+    """Renommage d'une borne GPS existante."""
+
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("ne doit pas être vide")
+        return name
+
+
 class AuditEntryCreate(BaseModel):
     """Création d'une entrée d'audit (journal des actions utilisateurs)."""
     user_name: str = Field(min_length=1, max_length=200)
