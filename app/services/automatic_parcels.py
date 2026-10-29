@@ -52,6 +52,7 @@ from app.services.field_watershed import (
     watershed_segment,
 )
 from app.services.parcel_registry import (
+    apply_forced_culture,
     as_number,
     as_string,
     as_string_array,
@@ -886,6 +887,14 @@ async def _save_automatic_analysis(candidate: dict[str, Any], analysis: dict[str
 
         if existing:
             values["label"] = existing.label
+            # Contour déjà enregistré (import KML notamment) : sa culture déclarée
+            # et ses notes (origine KML, règle blé/avoine) doivent survivre à
+            # l'analyse automatique. La règle ne force que le blé et l'avoine.
+            if not values.get("culture_declared") and existing.culture_declared:
+                values["culture_declared"] = existing.culture_declared
+            if values.get("notes") is None and existing.notes:
+                values["notes"] = existing.notes
+            apply_forced_culture(values, values.get("notes"))
             for key, value in values.items():
                 # Une analyse automatique ne connaît pas la surface (calculée côté carte) :
                 # elle ne doit pas effacer celle d'une parcelle déjà enregistrée.

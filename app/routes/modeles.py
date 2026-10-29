@@ -1,6 +1,6 @@
 """Route /api/modeles : inventaire des modeles IA reels deployes (MALTO).
 
-- Classification orge / non-orge : pipeline sklearn RandomForest (projet ASA/Orge,
+- Classification orge / autre culture : pipeline sklearn RandomForest (projet ASA/Orge,
   app/data/models/orge_rf), metriques et seuil reels lus dans metrics.json et
   threshold_selection.json.
 - Segmentation de parcelles : modele YOLO11-seg embarque dans le backend
@@ -52,9 +52,9 @@ def _read_json(path: Path) -> dict:
 
 
 def _rf_orge_model() -> dict:
-    """Modele RF orge/non-orge embarque : presence + metriques du projet Orge."""
+    """Modele RF orge / autre culture embarque : presence + metriques du projet Orge."""
     info: dict = {
-        "nom": "Classification orge / non-orge",
+        "nom": "Classification orge / autre culture",
         "type": "Random Forest (scikit-learn) — 48 variables spectrales-temporelles Sentinel-2",
         "fichier": RF_MODEL_PATH.name,
         "present": RF_MODEL_PATH.is_file(),

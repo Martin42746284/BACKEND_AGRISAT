@@ -1,10 +1,16 @@
 """
 Importe les delimitations de parcelles contenues dans les fichiers KML.
 
-Objectif : recuperer uniquement les contours deja dessines (Google Earth, etc.)
-sans jamais importer de culture et sans lancer de tracage manuel ou automatique.
-Les lignes creees portent `data_source = "Import KML"` et tous les champs de
-culture restent NULL.
+Objectif : recuperer les contours deja dessines (Google Earth, etc.) sans
+lancer de tracage manuel ou automatique. Les lignes creees portent
+`data_source = "Import KML"`.
+
+La culture lisible dans le nom du repere (« Orge Z89 », « Ble », « Avoine »,
+« pomme de terre + avoine »…) est inscrite dans `culture_declared`, avec un
+marqueur persistant dans `notes`. Pour le ble et l'avoine uniquement, la regle
+d'analyse force « Autre culture » a chaque analyse, meme apres suppression de la
+culture (voir app/services/kml_cultures.py) ; les autres cultures gardent la
+classification du modele.
 
 Le script est additif et idempotent :
   - il ne modifie ni ne supprime aucune parcelle existante ;
@@ -54,6 +60,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app.db import async_session_maker, engine  # noqa: E402
 from app.models import Parcelle  # noqa: E402
+from app.services.kml_cultures import kml_declared_crop, marker_text  # noqa: E402
 
 KML = "{http://www.opengis.net/kml/2.2}"
 DEFAULT_KML_DIR = BACKEND_ROOT / "kml"
@@ -80,6 +87,7 @@ class KmlParcel:
     center_lat: float
     center_lng: float
     fingerprint: str
+    declared_crop: str | None = None
 
     @property
     def display_order(self) -> str:
@@ -217,6 +225,7 @@ def _parse_file(path: Path) -> tuple[list[KmlParcel], dict[str, int]]:
                         center_lat=float(centroid.y),
                         center_lng=float(centroid.x),
                         fingerprint=_fingerprint(part_ring),
+                        declared_crop=kml_declared_crop(name),
                     )
                 )
     return parcels, stats
@@ -381,10 +390,14 @@ async def _apply_import(
         rows: list[Parcelle] = []
         for offset, parcel in enumerate(to_insert):
             part = "" if parcel.part <= 1 else f" (partie {parcel.part})"
-            notes = (
-                f"Import KML — {parcel.file} — repère {parcel.display_order}{part}. "
-                "Délimitation uniquement, aucune culture importée."
-            )
+            notes = f"Import KML — {parcel.file} — repère {parcel.display_order}{part}. "
+            if parcel.declared_crop:
+                notes += (
+                    f"{marker_text(parcel.declared_crop)} "
+                    "Délimitation importée, culture non classée automatiquement."
+                )
+            else:
+                notes += "Délimitation uniquement, aucune culture importée."
             rows.append(
                 Parcelle(
                     id=uuid.uuid4(),
@@ -393,15 +406,19 @@ async def _apply_import(
                     center_lat=parcel.center_lat,
                     center_lng=parcel.center_lng,
                     surface_ha=parcel.surface_ha,
-                    # Tous les champs de culture / analyse restent volontairement NULL.
-                    culture_declared=None,
+                    # Seule la culture déclarée dans le KML (blé/avoine) est reprise :
+                    # la classification reste vide jusqu'à l'analyse.
+                    culture_declared=parcel.declared_crop,
                     culture_detected=None,
                     ndvi_percentage=None,
                     ndre=None,
                     spectral_bands=None,
                     confidence=None,
                     verdict="Contour importé depuis un fichier KML",
-                    details=f"Délimitation importée depuis {parcel.file} (aucune culture importée).",
+                    details=(
+                        f"Délimitation importée depuis {parcel.file}"
+                        + (f" — culture d'origine : {parcel.declared_crop}." if parcel.declared_crop else " (aucune culture importée).")
+                    ),
                     saison=None,
                     soil_type=None,
                     risk_factors=None,

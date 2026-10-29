@@ -5,7 +5,7 @@ Google Earth Engine partagé par automatic_parcels.py, barley_detect_simple.py,
 zoning.py et app/routes/sentinel_tiles.py (mêmes primitives : auth, gee_call/
 gee_constant, add_spectral_index, capture d'images, fetch_with_retry).
 
-Verdict orge / non-orge, par ordre de priorité :
+Verdict orge / autre culture, par ordre de priorité :
 1. Classifieur RF orge (barley_rf_classifier.py, modèle du projet ASA/Orge :
    48 variables spectrales-temporelles sur 12 mois de série Sentinel-2,
    probabilité moyenne au niveau parcelle) ;
@@ -60,6 +60,15 @@ TIME_SERIES_CONCURRENCY = 3
 GEE_COMPUTE_TIMEOUT_S = 60.0
 EXTERNAL_REQUEST_TIMEOUT_S = 30.0
 RETRY_DELAYS_S = (0.25, 1.0)
+
+
+def detected_culture_label(is_barley: bool) -> str:
+    """Classe de culture enregistrée pour une parcelle.
+
+    L'application ne connaît que deux issues : « Orge » et « Autre culture ».
+    L'ancien statut binaire « NON_ORGE » n'existe pas dans l'application.
+    """
+    return "Orge" if is_barley else "Autre culture"
 
 
 def js_round(x: float) -> int:
@@ -1027,7 +1036,7 @@ def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score:
     penalty = disagreement * 0.08 if disagreement > 55 else 0
 
     # Le score d'orge final suit la règle +5 sous 70 % / >65 % (orge_scoring.py).
-    # Le seuil NON-ORGE existant (>50 %) est conservé.
+    # Le seuil existant (>50 %) est conservé.
     final_is_barley = raw_score > 50
     final_score = js_round(final_barley_score(raw_score)) if final_is_barley else raw_score
     final_confirmed = final_is_barley and final_score > 65
@@ -1038,7 +1047,7 @@ def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score:
     elif final_is_barley:
         verdict = f"⚠️ ORGE À VÉRIFIER — CNN + Règles agro concordent (score final {final_score}%)"
     else:
-        verdict = f"❌ NON-ORGE — CNN + Règles agro concordent (score {raw_score}%)"
+        verdict = f"Autre culture — CNN + Règles agro concordent (score {raw_score}%)"
     if disagreement > 55:
         verdict += f" (⚠️ désaccord CNN/Agro: {disagreement:.0f}%)"
 
@@ -1066,7 +1075,7 @@ def create_agro_only_hybrid_score(agro_score: float) -> dict[str, Any]:
             f"Score agro {agro_score}% → score final {final_score}%"
         )
     else:
-        verdict = f"⚠️ NON-ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
+        verdict = f"Autre culture probable (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
     return {
         "hybrid_score": final_score,
         "final_is_barley": final_is_barley,
@@ -1150,7 +1159,7 @@ def verdict_from_rf(rf: dict[str, Any]) -> dict[str, Any]:
     if not rf["is_barley"]:
         final_score = pct
         final_confirmed = False
-        verdict = f"❌ NON-ORGE — RF Orge (probabilité d'orge {pct}%)"
+        verdict = f"Autre culture — RF Orge (probabilité d'orge {pct}%)"
         final_confidence = js_round(max(probability, 1 - probability) * 100)
     else:
         final_score = js_round(final_barley_score(pct))
@@ -1207,7 +1216,7 @@ def verdict_from_s2(s2: dict[str, Any]) -> dict[str, Any]:
     if not s2["is_barley"]:
         final_score = pct
         final_confirmed = False
-        verdict = f"❌ NON-ORGE — Sentinel-2 (probabilité d'orge {pct}%)"
+        verdict = f"Autre culture — Sentinel-2 (probabilité d'orge {pct}%)"
         final_confidence = js_round(max(probability, 1 - probability) * 100)
     else:
         final_score = js_round(final_barley_score(pct))
@@ -1375,7 +1384,7 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if sat_data["vhVvRatio"] is not None and sat_data["vhVvRatio"] > 0.45:
             risk_factors.append("Structure radar type forêt")
         if not hybrid["final_is_barley"] and hybrid["final_confidence"] > 70:
-            risk_factors.append("Verdict non-orge avec une confiance élevée")
+            risk_factors.append("Classement « Autre culture » avec une confiance élevée")
 
         detail_parts = []
         if rf:
@@ -1383,7 +1392,7 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if s2:
             detail_parts.append(f"Sentinel-2: orge {js_round(s2['probability'] * 100)}%")
         cnn_label = "CNN (indicatif)" if (rf or s2) else "CNN"
-        detail_parts.append(f"{cnn_label}: {'orge' if hf_result['is_barley'] else 'non-orge'} ({hf_result['confidence']:.1f}%)" if hf_result else f"{cnn_label}: indisponible")
+        detail_parts.append(f"{cnn_label}: {'orge' if hf_result['is_barley'] else 'autre culture'} ({hf_result['confidence']:.1f}%)" if hf_result else f"{cnn_label}: indisponible")
         detail_parts.append(f"Agro{' (indicatif)' if (rf or s2) else ''}: {agro['score']}%")
         if not (rf or s2):
             detail_parts.append(f"Hybride: {hybrid['hybrid_score']}%")
@@ -1395,23 +1404,23 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
         if rf:
             recommendations = (
-                f"{'Orge' if rf['is_barley'] else 'Non-orge'} selon la dynamique saisonnière Sentinel-2 de la parcelle "
+                f"{'Orge' if rf['is_barley'] else 'Autre culture'} selon la dynamique saisonnière Sentinel-2 de la parcelle "
                 f"(probabilité d'orge {js_round(rf['probability'] * 100)}%). {rf_calibration_note()}"
             )
         elif s2:
             recommendations = (
-                f"{'Orge' if s2['is_barley'] else 'Non-orge'} selon les indices Sentinel-2 de la parcelle "
+                f"{'Orge' if s2['is_barley'] else 'Autre culture'} selon les indices Sentinel-2 de la parcelle "
                 f"(probabilité d'orge {js_round(s2['probability'] * 100)}%). {s2_calibration_note(s2)}"
             )
         elif hf_result:
             recommendations = (
                 f"Orge {'confirmée' if hybrid['final_confirmed'] else 'à vérifier'}. Score final {hybrid['hybrid_score']}% (CNN {js_round(hf_result['confidence'])}% + Agro {agro['score']}%)."
                 if hybrid["final_is_barley"]
-                else f"Non-orge détecté. Score hybride {hybrid['hybrid_score']}%. Vérification terrain recommandée."
+                else f"Autre culture détectée. Score hybride {hybrid['hybrid_score']}%. Vérification terrain recommandée."
             )
         else:
             recommendations = (
-                f"{'Orge confirmée' if hybrid['final_confirmed'] else 'Orge à vérifier' if hybrid['final_is_barley'] else 'Non-orge probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score final {hybrid['hybrid_score']}%). Vérification terrain recommandée."
+                f"{'Orge confirmée' if hybrid['final_confirmed'] else 'Orge à vérifier' if hybrid['final_is_barley'] else 'Autre culture probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score final {hybrid['hybrid_score']}%). Vérification terrain recommandée."
             )
 
         response = {
@@ -1426,7 +1435,11 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             "hf_available": hf_result is not None,
             "verdict": hybrid["final_verdict"],
             "details": " | ".join(detail_parts),
-            "culture_detected": ("Orge" if hybrid["final_is_barley"] else "Non-orge") if (rf or s2) else (("Orge" if hf_result["is_barley"] else "Non-orge") if hf_result else None),
+            "culture_detected": (
+                detected_culture_label(hybrid["final_is_barley"])
+                if (rf or s2)
+                else (detected_culture_label(hf_result["is_barley"]) if hf_result else None)
+            ),
             "confidence": hybrid["final_confidence"] if (rf or s2) else (hf_result["confidence"] if hf_result else None),
             "cnn_prob_barley": hf_result["prob_barley"] if hf_result else None,
             "cnn_prob_non_barley": hf_result["prob_non_barley"] if hf_result else None,

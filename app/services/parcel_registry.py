@@ -28,6 +28,13 @@ from sqlalchemy import select
 
 from app.db import async_session_maker
 from app.models import Parcelle
+from app.services.kml_cultures import (
+    FORCED_OTHER_CULTURE,
+    forced_culture_texts,
+    is_non_barley_label,
+    kml_crop_from_notes,
+    normalize_label,
+)
 
 logger = logging.getLogger("agrisat.parcel_registry")
 
@@ -261,6 +268,31 @@ async def filter_analyzed_candidates(
 # ── Écriture d'une analyse dans `parcelles` ──
 
 
+def apply_forced_culture(values: dict[str, Any], notes: str | None) -> dict[str, Any]:
+    """Applique la règle blé/avoine à des colonnes prêtes pour `parcelles`.
+
+    Seuls le blé et l'avoine sont forcés « Autre culture ». Toute autre culture
+    (orge, pomme de terre, haricot…) conserve le résultat du modèle ; le marqueur
+    des autres cultures présentes dans `notes` n'a donc aucun effet ici.
+    """
+    forced_crop = kml_crop_from_notes(notes)
+    if forced_crop is None:
+        return values
+    texts = forced_culture_texts(forced_crop, as_string(values.get("details")))
+    values["culture_declared"] = forced_crop
+    values["culture_detected"] = FORCED_OTHER_CULTURE
+    values["verdict"] = texts["verdict"]
+    values["details"] = texts["details"]
+    values["recommendations"] = texts["recommendations"]
+    # Le verdict « non-orge avec une confiance élevée » ne décrit plus rien pour
+    # une parcelle forcée « Autre culture ».
+    values["risk_factors"] = [
+        risk for risk in as_string_array(values.get("risk_factors"))
+        if "non-orge" not in normalize_label(risk)
+    ]
+    return values
+
+
 def analysis_to_values(
     analysis: dict[str, Any],
     *,
@@ -272,16 +304,29 @@ def analysis_to_values(
     owner_name: str | None = None,
     notes: str | None = None,
 ) -> dict[str, Any]:
-    """Résultat d'analyse → colonnes de la table `parcelles`."""
+    """Résultat d'analyse → colonnes de la table `parcelles`.
+
+    Règle métier : une parcelle de blé ou d'avoine identifiée dans un fichier
+    KML est toujours classée « Autre culture », quelle que soit la sortie du
+    modèle orge/non-orge. Le marqueur est relu dans `notes` : la règle survit
+    donc à la suppression de la culture et s'applique à chaque réanalyse.
+
+    Le classifieur ne connaît que deux classes : « Orge » et tout le reste, qui
+    s'appelle « Autre culture » dans l'application (le libellé binaire hérité
+    « Non-orge » / « NON_ORGE » n'est jamais enregistré).
+    """
     days_since_planting = analysis.get("days_since_planting")
-    return {
+    detected_culture = as_string(analysis.get("culture_detected"))
+    if is_non_barley_label(detected_culture):
+        detected_culture = FORCED_OTHER_CULTURE
+    values = {
         "label": label,
         "coordinates": coordinates,
         "center_lat": center_lat,
         "center_lng": center_lng,
         "surface_ha": surface_ha,
         "culture_declared": None,
-        "culture_detected": as_string(analysis.get("culture_detected")),
+        "culture_detected": detected_culture,
         "ndvi_percentage": as_number(analysis.get("percentage")),
         "ndre": as_number(analysis.get("ndre")),
         "spectral_bands": analysis.get("spectral_bands") if isinstance(analysis.get("spectral_bands"), dict) else None,
@@ -311,6 +356,7 @@ def analysis_to_values(
         "cnn_prob_barley": as_number(analysis.get("cnn_prob_barley")),
         "cnn_prob_non_barley": as_number(analysis.get("cnn_prob_non_barley")),
     }
+    return apply_forced_culture(values, notes)
 
 
 # Résultat de `store_parcel_analysis` : ligne enregistrée + statut.
@@ -435,6 +481,14 @@ async def store_parcel_analysis(
             return serialize_parcelle(row), STORE_CREATED
 
         values["label"] = row.label
+        # Culture déclarée dans le KML (orge Z89, blé…) : une analyse ne doit pas
+        # l'effacer, sinon la fiche ne montre plus la culture réelle du contour.
+        if not values.get("culture_declared") and row.culture_declared:
+            values["culture_declared"] = row.culture_declared
+        # `notes` porte les marqueurs persistants (origine KML, culture blé/avoine…).
+        # Un appelant qui n'en fournit pas ne doit pas effacer ceux de la ligne.
+        if notes is None and row.notes:
+            values["notes"] = row.notes
         for key, value in values.items():
             setattr(row, key, value)
         await session.commit()

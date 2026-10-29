@@ -65,7 +65,7 @@ def test_classify_returns_parcel_probability():
     assert result["threshold"] == pytest.approx(0.2892)
     assert result["n_features"] == 64
     assert result["n_observations"] == 12
-    assert result["verdict"] in {"ORGE", "A_VERIFIER", "NON_ORGE"}
+    assert result["verdict"] in {"ORGE", "A_VERIFIER", "AUTRE_CULTURE"}
     assert result["model_version"].startswith("orge_rf")
 
 
@@ -122,11 +122,11 @@ def test_verdict_uses_final_score_only():
     assert _verdict(0.62, ndvi_oct=0.80, doy_peak=300) == "ORGE"   # 67 > 65
     assert _verdict(0.60, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 65 <= 65
     assert _verdict(0.56, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 61 <= 65
-    assert _verdict(0.05, ndvi_oct=0.20, doy_peak=210) == "NON_ORGE"
+    assert _verdict(0.05, ndvi_oct=0.20, doy_peak=210) == "AUTRE_CULTURE"
 
-    # Le seuil NON-ORGE du modèle reste celui du RF (et non l'ancien 0.15).
+    # Le seuil « autre culture » du modèle reste celui du RF (et non l'ancien 0.15).
     assert _verdict(0.30, threshold=0.2892) == "A_VERIFIER"
-    assert _verdict(0.28, threshold=0.2892) == "NON_ORGE"
+    assert _verdict(0.28, threshold=0.2892) == "AUTRE_CULTURE"
 
 
 def test_verdict_from_rf_applies_final_score():
@@ -139,9 +139,10 @@ def test_verdict_from_rf_applies_final_score():
         assert result["final_confidence"] == final
         assert f"score final {final}%" in result["final_verdict"]
 
-    # NON-ORGE : le bonus ne touche pas la confiance de classe (1 - probabilité d'orge).
-    non_orge = verdict_from_rf({"probability": 0.23, "is_barley": False, "threshold": 0.2892})
-    assert non_orge["hybrid_score"] == 23
-    assert non_orge["final_confirmed"] is False
-    assert non_orge["final_confidence"] == 77
-    assert "score final" not in non_orge["final_verdict"]
+    # Autre culture : le bonus ne touche pas la confiance de classe (1 - probabilité d'orge).
+    autre = verdict_from_rf({"probability": 0.23, "is_barley": False, "threshold": 0.2892})
+    assert autre["hybrid_score"] == 23
+    assert autre["final_confirmed"] is False
+    assert autre["final_confidence"] == 77
+    assert "score final" not in autre["final_verdict"]
+    assert autre["final_verdict"].startswith("Autre culture")

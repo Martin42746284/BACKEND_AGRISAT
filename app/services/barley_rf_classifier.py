@@ -237,9 +237,12 @@ def _verdict(
     `ndvi_oct` et `doy_peak` restent acceptés pour compatibilité avec l'ancien
     verdict à trois niveaux, mais ne conditionnent plus la confirmation : seules
     les nouvelles règles de score (voir `orge_scoring`) décident ORGE / À VÉRIFIER.
+
+    Hors orge, la classe est « AUTRE_CULTURE » : l'application n'a pas de statut
+    « NON_ORGE » (libellé historique du classifieur binaire).
     """
     if probability < threshold:
-        return "NON_ORGE"
+        return "AUTRE_CULTURE"
     return "ORGE" if is_barley_confirmed(probability * 100) else "A_VERIFIER"
 
 
