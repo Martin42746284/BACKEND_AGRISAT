@@ -4,14 +4,19 @@ Ces tests ne touchent pas la base : ils vérifient la règle qui protège les
 données d'une parcelle déjà analysée.
 """
 
+import asyncio
 import uuid
 
 from app.models import Parcelle
+from app.services import parcel_registry
+from app.services.kml_cultures import FORCED_CANDIDATE_TAG
 from app.services.parcel_registry import (
     ANALYSIS_MATCH_TOLERANCE_M,
     REJECTED_PARCEL_SOURCE,
+    apply_forced_candidate,
     bbox_deltas,
     distance_m,
+    filter_analyzed_candidates,
     nearest_analyzed_parcel,
     nearest_parcel,
     row_has_analysis,
@@ -111,6 +116,54 @@ def test_analyzed_row_takes_precedence_over_nearer_outline():
     analyzed = _row(culture_detected="Orge")
     rows = [outline, analyzed]
     assert (nearest_analyzed_parcel(rows, 34.0, -6.0) or nearest_parcel(rows, 34.0, -6.0)) is analyzed
+
+
+def test_kml_wheat_candidate_is_tagged_for_forced_classification():
+    """Un contour KML blé/avoine est classé « Autre culture » sans modèle."""
+    notes = "Import KML — AGRI-MADA (1).kml — repère 0012. Culture d'origine (KML) : Blé."
+    row = _row(notes=notes)
+    candidate = {
+        "id": str(row.id),
+        "coordinates": [],
+        "center": {"lat": 34.0, "lng": -6.0},
+        "tags": {"source": "jecam-vhr"},
+    }
+    tagged = apply_forced_candidate(candidate, row)
+    assert tagged["tags"][FORCED_CANDIDATE_TAG] == "Blé"
+    # Le candidat d'origine n'est pas modifié (aucun effet de bord sur la requête).
+    assert FORCED_CANDIDATE_TAG not in candidate["tags"]
+
+
+def test_other_kml_crop_candidate_goes_through_the_model():
+    """La règle ne vise que le blé et l'avoine : une orge KML reste à classer."""
+    notes = "Import KML — AGRI-MADA (1).kml — repère 0003. Culture d'origine (KML) : Orge."
+    row = _row(notes=notes)
+    candidate = {"id": str(row.id), "tags": {"source": "jecam-vhr"}}
+    assert apply_forced_candidate(candidate, row) == candidate
+
+
+def test_traced_outline_without_kml_marker_is_not_tagged():
+    row = _row(notes="Tracé manuel")
+    candidate = {"id": str(row.id), "tags": {"source": "jecam-vhr"}}
+    assert apply_forced_candidate(candidate, row) == candidate
+
+
+def test_zone_filter_tags_the_kml_candidate_it_keeps(monkeypatch):
+    """Candidat d'une ligne KML blé non analysée : il part à l'analyse étiqueté."""
+    notes = "Import KML — AGRI-MADA (1).kml — repère 0012. Culture d'origine (KML) : Blé."
+    row = _row(notes=notes, data_source="Import KML")
+
+    async def fake_rows(*args, **kwargs):
+        return [row]
+
+    monkeypatch.setattr(parcel_registry, "load_parcels_in_area", fake_rows)
+
+    candidate = {"id": str(row.id), "center": {"lat": 34.0, "lng": -6.0}, "tags": {"source": "jecam-vhr"}}
+    kept, skipped = asyncio.run(filter_analyzed_candidates([candidate], 34.0, -6.0, 500.0))
+
+    assert skipped == []
+    assert len(kept) == 1
+    assert kept[0]["tags"][FORCED_CANDIDATE_TAG] == "Blé"
 
 
 def test_bbox_deltas_cover_the_disk():

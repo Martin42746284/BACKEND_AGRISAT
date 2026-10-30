@@ -17,6 +17,11 @@ import unicodedata
 
 FORCED_OTHER_CULTURE = "Autre culture"
 
+# Étiquette posée sur un candidat d'analyse dont la ligne `parcelles` est un
+# contour KML blé/avoine : il est classé « Autre culture » par la règle métier,
+# sans passer par le modèle de classification.
+FORCED_CANDIDATE_TAG = "kml_forced_culture"
+
 # Marqueur lisible, écrit par scripts/import_kml_parcels.py :
 #   « Culture d'origine (KML) : Blé. »
 MARKER_RE = re.compile(r"culture d['’]origine\s*\(kml\)\s*:\s*([^.;\n]+)", re.IGNORECASE)
@@ -29,11 +34,12 @@ def normalize_label(value: str) -> str:
     return without_accents.lower()
 
 
-# Cultures reconnues dans les noms de repères KML, hors blé/avoine. Elles sont
-# seulement reprises comme culture déclarée : la règle « Autre culture » ne
-# s'applique qu'au blé et à l'avoine (`kml_crop_label`). Les variantes fautives
-# rencontrées dans les KML (« raigrasse », « carrotte », « Hricot »…) sont
-# ramenées au libellé canonique.
+# Cultures reconnues dans les noms de repères KML, hors blé/avoine. Elles ne
+# sont pas reprises à l'import (aucune culture n'est attribuée avant l'analyse),
+# mais restent exposées par `kml_declared_crop` pour la lecture des fichiers. La
+# règle « Autre culture » ne s'applique qu'au blé et à l'avoine
+# (`kml_crop_label`). Les variantes fautives rencontrées dans les KML
+# (« raigrasse », « carrotte », « Hricot »…) sont ramenées au libellé canonique.
 OTHER_KML_CROPS: tuple[tuple[str, str], ...] = (
     ("riz", "Riz"),
     ("hricot", "Haricot"),
@@ -78,9 +84,10 @@ def kml_crop_label(placemark_name: str | None) -> str | None:
 def kml_declared_crop(placemark_name: str | None) -> str | None:
     """Culture lisible dans un nom de repère KML, toutes cultures reconnues.
 
-    Sert à renseigner `culture_declared` à l'import : la fiche d'une parcelle
-    importée affiche ainsi la culture réellement portée par le KML (blé, avoine,
-    orge Z89…) au lieu d'une parcelle sans déclaration.
+    Lecture informative des fichiers : l'import n'écrit plus `culture_declared`,
+    une parcelle importée n'ayant aucune culture avant d'être analysée. Seul le
+    blé et l'avoine sont mémorisés (marqueur de `notes`) pour être classés
+    « Autre culture » à l'analyse, sans modèle.
     """
     forced = kml_crop_label(placemark_name)
     if forced is not None:

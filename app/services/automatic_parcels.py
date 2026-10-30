@@ -51,6 +51,11 @@ from app.services.field_watershed import (
     trace_label_contours,
     watershed_segment,
 )
+from app.services.kml_cultures import (
+    FORCED_CANDIDATE_TAG,
+    FORCED_OTHER_CULTURE,
+    forced_culture_texts,
+)
 from app.services.parcel_registry import (
     apply_forced_culture,
     as_number,
@@ -760,11 +765,47 @@ _as_string = as_string
 _as_string_array = as_string_array
 
 
+KML_FORCED_SOURCE = "Règle métier KML (blé/avoine)"
+
+
+def _forced_other_culture_analysis(crop: str) -> dict[str, Any]:
+    """Résultat « Autre culture » imposé par la règle métier, sans modèle.
+
+    Mêmes champs que ceux publiés par l'analyse d'une parcelle, pour que la
+    carte, la liste des résultats et la fiche se comportent de façon identique.
+    Aucune confiance de modèle n'est inventée : la décision vient du KML.
+    """
+    texts = forced_culture_texts(crop)
+    return {
+        "culture_detected": FORCED_OTHER_CULTURE,
+        "is_barley": False,
+        "barley_presence": "none",
+        "verdict": texts["verdict"],
+        "recommendations": texts["recommendations"],
+        "confidence": None,
+        "percentage": None,
+        "data_source": KML_FORCED_SOURCE,
+    }
+
+
 async def _analyze_candidate(
     candidate: dict[str, Any],
     config: dict[str, float],
     shared_gdd: dict[str, Any],
 ) -> dict[str, Any]:
+    # Parcelle blé/avoine importée d'un KML : la règle métier la classe
+    # « Autre culture ». Ni image satellite ni modèle de classification ne sont
+    # nécessaires, et le résultat est enregistré comme celui d'une analyse.
+    forced_crop = (candidate.get("tags") or {}).get(FORCED_CANDIDATE_TAG)
+    if isinstance(forced_crop, str) and forced_crop:
+        analysis = _forced_other_culture_analysis(forced_crop)
+        if candidate.get("persist") is not False:
+            try:
+                await _save_automatic_analysis(candidate, analysis)
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Automatic analysis %s was not persisted: %s", candidate["id"], error)
+        return {**candidate, "analysis": analysis, "analysis_error": None}
+
     zoom = 15
     if candidate["tags"].get("source") == TRACED_PARCEL_SOURCE:
         # Parcelles tracées souvent sous 1 ha : on cadre l'image envoyée au CNN sur la parcelle.

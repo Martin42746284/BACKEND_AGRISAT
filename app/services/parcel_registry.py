@@ -29,6 +29,7 @@ from sqlalchemy import select
 from app.db import async_session_maker
 from app.models import Parcelle
 from app.services.kml_cultures import (
+    FORCED_CANDIDATE_TAG,
     FORCED_OTHER_CULTURE,
     forced_culture_texts,
     is_non_barley_label,
@@ -250,7 +251,10 @@ async def filter_analyzed_candidates(
         # analysée alors que sa ligne en base est vide.
         stored = rows_by_id.get(str(candidate.get("id") or ""))
         if stored is not None:
-            (skipped if row_has_analysis(stored) else kept).append(candidate)
+            if row_has_analysis(stored):
+                skipped.append(candidate)
+            else:
+                kept.append(apply_forced_candidate(candidate, stored))
             continue
         center = candidate.get("center") or {}
         candidate_lat, candidate_lng = center.get("lat"), center.get("lng")
@@ -266,6 +270,21 @@ async def filter_analyzed_candidates(
 
 
 # ── Écriture d'une analyse dans `parcelles` ──
+
+
+def apply_forced_candidate(candidate: dict[str, Any], row: Parcelle) -> dict[str, Any]:
+    """Étiquette un candidat dont la ligne en base est un contour KML blé/avoine.
+
+    La règle métier classe ces parcelles « Autre culture » : l'analyse lit cette
+    étiquette et n'appelle pas le modèle de classification, dont le verdict
+    serait de toute façon remplacé. Le libellé (blé, avoine) est repris du
+    marqueur persistant de `notes`, seul souvenir conservé à l'import KML.
+    """
+    crop = kml_crop_from_notes(row.notes)
+    if crop is None:
+        return candidate
+    tags = {**(candidate.get("tags") or {}), FORCED_CANDIDATE_TAG: crop}
+    return {**candidate, "tags": tags}
 
 
 def apply_forced_culture(values: dict[str, Any], notes: str | None) -> dict[str, Any]:
