@@ -99,29 +99,32 @@ def test_model_artifacts_are_valid_json():
 
 
 def test_final_barley_score_examples():
-    """Règle utilisateur : +5 points sous 70 %, puis confirmation si >65 %."""
-    assert final_barley_score(56) == pytest.approx(61)
-    assert final_barley_score(62) == pytest.approx(67)
-    assert final_barley_score(69) == pytest.approx(74)
+    """Règle utilisateur : +10 points sous 70 %, puis confirmation si ≥60 %."""
+    assert final_barley_score(56) == pytest.approx(66)
+    assert final_barley_score(62) == pytest.approx(72)
+    assert final_barley_score(69) == pytest.approx(79)
     assert final_barley_score(75) == pytest.approx(75)
     assert final_barley_score(70) == pytest.approx(70)
     assert final_barley_score(100) == pytest.approx(100)
 
-    assert not is_barley_confirmed(56)  # 61 <= 65
-    assert is_barley_confirmed(62)      # 67 > 65
-    assert is_barley_confirmed(69)      # 74 > 65
-    assert is_barley_confirmed(75)      # 75 > 65
-    assert not is_barley_confirmed(60)  # 65 n'est pas > 65
-    assert is_barley_confirmed(65)      # 70 > 65
+    assert not is_barley_confirmed(49)  # 59 < 60
+    assert is_barley_confirmed(50)      # 60 >= 60 (seuil inclus)
+    assert is_barley_confirmed(56)      # 66 >= 60
+    assert is_barley_confirmed(62)      # 72 >= 60
+    assert is_barley_confirmed(75)      # 75 >= 60
+    assert is_barley_confirmed(60)      # 70 >= 60
+    assert is_barley_confirmed(65)      # 75 >= 60
 
 
 def test_verdict_uses_final_score_only():
     # Les anciens garde-fous agro (NDVI d'octobre, date du pic) ne bloquent plus la confirmation.
     assert _verdict(0.90, ndvi_oct=0.20, doy_peak=210) == "ORGE"
     assert _verdict(0.90, ndvi_oct=0.80, doy_peak=210) == "ORGE"
-    assert _verdict(0.62, ndvi_oct=0.80, doy_peak=300) == "ORGE"   # 67 > 65
-    assert _verdict(0.60, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 65 <= 65
-    assert _verdict(0.56, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 61 <= 65
+    assert _verdict(0.62, ndvi_oct=0.80, doy_peak=300) == "ORGE"   # 72 >= 60
+    assert _verdict(0.60, ndvi_oct=0.20, doy_peak=210) == "ORGE"   # 70 >= 60
+    assert _verdict(0.56, ndvi_oct=0.20, doy_peak=210) == "ORGE"   # 66 >= 60
+    assert _verdict(0.54, ndvi_oct=0.20, doy_peak=210) == "ORGE"   # 64 >= 60
+    assert _verdict(0.49, ndvi_oct=0.20, doy_peak=210) == "A_VERIFIER"  # 59 < 60
     assert _verdict(0.05, ndvi_oct=0.20, doy_peak=210) == "AUTRE_CULTURE"
 
     # Le seuil « autre culture » du modèle reste celui du RF (et non l'ancien 0.15).
@@ -132,7 +135,7 @@ def test_verdict_uses_final_score_only():
 def test_verdict_from_rf_applies_final_score():
     from app.services.analyze_parcel import verdict_from_rf
 
-    for initial, final, confirmed in ((56, 61, False), (62, 67, True), (69, 74, True), (75, 75, True)):
+    for initial, final, confirmed in ((49, 59, False), (56, 66, True), (62, 72, True), (75, 75, True)):
         result = verdict_from_rf({"probability": initial / 100, "is_barley": True, "threshold": 0.2892})
         assert result["hybrid_score"] == final
         assert result["final_confirmed"] is confirmed

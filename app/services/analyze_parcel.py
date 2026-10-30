@@ -43,7 +43,7 @@ from app.services.barley_rf_classifier import classify as classify_barley_rf
 from app.services.barley_s2_classifier import classify as classify_barley_s2
 from app.services.barley_rf_classifier import load_model as load_barley_rf
 from app.services.field_watershed import lng_lat_to_mercator_meters
-from app.services.orge_scoring import final_barley_score, is_barley_confirmed
+from app.services.orge_scoring import CONFIRM_THRESHOLD_PCT, final_barley_score, is_barley_confirmed
 # s2_time_series importe les primitives GEE de ce module : import paresseux dans
 # analyze_parcel() pour éviter l'import circulaire (comme zoning.py / automatic_parcels.py).
 
@@ -1035,11 +1035,11 @@ def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score:
     disagreement = abs(cnn_score - agro_score)
     penalty = disagreement * 0.08 if disagreement > 55 else 0
 
-    # Le score d'orge final suit la règle +5 sous 70 % / >65 % (orge_scoring.py).
+    # Le score d'orge final suit la règle +10 sous 70 % / ≥60 % (orge_scoring.py).
     # Le seuil existant (>50 %) est conservé.
     final_is_barley = raw_score > 50
     final_score = js_round(final_barley_score(raw_score)) if final_is_barley else raw_score
-    final_confirmed = final_is_barley and final_score > 65
+    final_confirmed = final_is_barley and final_score >= CONFIRM_THRESHOLD_PCT
     final_confidence = max(0, min(100, js_round(final_score - penalty)))
 
     if final_confirmed:
@@ -1063,7 +1063,7 @@ def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score:
 def create_agro_only_hybrid_score(agro_score: float) -> dict[str, Any]:
     final_is_barley = agro_score > 50
     final_score = js_round(final_barley_score(agro_score)) if final_is_barley else agro_score
-    final_confirmed = final_is_barley and final_score > 65
+    final_confirmed = final_is_barley and final_score >= CONFIRM_THRESHOLD_PCT
     if final_confirmed:
         verdict = (
             f"✅ ORGE CONFIRMÉE (CNN indisponible, estimation agro seule) — "
@@ -1153,7 +1153,7 @@ def rf_calibration_note() -> str:
 
 def verdict_from_rf(rf: dict[str, Any]) -> dict[str, Any]:
     """Même forme que verdict_from_s2, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte le score final d'orge (probabilité RF +5 points sous 70 %)."""
+    hybrid_score porte le score final d'orge (probabilité RF +10 points sous 70 %)."""
     probability = rf["probability"]
     pct = js_round(probability * 100)
     if not rf["is_barley"]:
@@ -1210,7 +1210,7 @@ def s2_calibration_note(s2: dict[str, Any]) -> str:
 
 def verdict_from_s2(s2: dict[str, Any]) -> dict[str, Any]:
     """Même forme que compute_hybrid_score, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte le score final d'orge (probabilité S2 +5 points sous 70 %)."""
+    hybrid_score porte le score final d'orge (probabilité S2 +10 points sous 70 %)."""
     probability = s2["probability"]
     pct = js_round(probability * 100)
     if not s2["is_barley"]:

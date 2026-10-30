@@ -232,7 +232,7 @@ def _verdict(
     doy_peak: float | None = None,
     threshold: float = REJECT_THRESHOLD,
 ) -> str:
-    """Verdict parcelle : rejet sous le seuil du modèle, puis score final +5 / >65 %.
+    """Verdict parcelle : rejet sous le seuil du modèle, puis score final +10 / ≥60 %.
 
     `ndvi_oct` et `doy_peak` restent acceptés pour compatibilité avec l'ancien
     verdict à trois niveaux, mais ne conditionnent plus la confirmation : seules
