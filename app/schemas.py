@@ -239,14 +239,27 @@ class DeleteParcelleParams(BaseModel):
 
 
 class ParcelleUpdate(BaseModel):
-    """Champs modifiables lors d'une correction humaine sur une parcelle."""
+    """Champs modifiables d'une parcelle : correction humaine de la culture, ou
+    nouveau contour après une scission manuelle d'une parcelle fusionnée."""
+
     culture_detected: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=100.0)
     verdict: str | None = None
     details: str | None = None
     saison: str | None = None
 
+    # Contour : une parcelle scindée conserve sa ligne en base mais n'en garde
+    # qu'une partie ; centre et superficie suivent le nouveau contour.
+    coordinates: list[Point] | None = Field(default=None, min_length=3, max_length=5_000)
+    center_lat: float | None = Field(default=None, ge=-90, le=90)
+    center_lng: float | None = Field(default=None, ge=-180, le=180)
+    surface_ha: float | None = Field(default=None, ge=0)
+
     model_config = ConfigDict(populate_by_name=True)
+
+    _v_coords = field_validator("center_lat", "center_lng", "surface_ha")(
+        lambda v: _finite(v) if v is not None else v
+    )
 
 
 class BorneGpsCreate(BaseModel):

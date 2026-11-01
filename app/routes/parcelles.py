@@ -200,7 +200,9 @@ async def update_parcelle(parcelle_id: str, request: Request) -> JSONResponse:
         if existing is None:
             return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
 
-        update_data = parsed_update.model_dump(exclude_unset=True)
+        # `mode="json"` convertit le contour (liste de Point) en lignes {lat, lng} :
+        # la colonne est un JSONB, un modèle Pydantic n'y serait pas sérialisable.
+        update_data = parsed_update.model_dump(exclude_unset=True, mode="json")
         for field, value in update_data.items():
             setattr(existing, field, value)
 
