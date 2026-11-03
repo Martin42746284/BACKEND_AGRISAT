@@ -212,6 +212,40 @@ def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
     stats["late_green"] = 1.0 if stats["NDVI_oct"] > stats["NDVI_sep"] + 0.05 else 0.0
     peak_late = max(stats["NDVI_aug"], stats["NDVI_sep"])
     stats["green_persistence_oct"] = stats["NDVI_oct"] / (peak_late + 1e-4)
+
+    # Variables du modèle 64 variables (orge_model.MADAGASCAR_FEATURES) :
+    # persistance, forme du pic et cumuls juin-octobre. Sans elles, le modèle
+    # recevait des zéros à la place de mesures pourtant discriminantes.
+    stats["ndvi_oct_mean_ratio"] = stats["NDVI_oct"] / (mean_ndvi + 1e-4)
+    stats["slope_post_peak_oct"] = max_ndvi - stats["NDVI_oct"]
+    stats["peak_width_proxy"] = stats["drop_max_to_oct"] / (max_ndvi + 1e-4)
+    # Courbe mai-octobre ; juillet n'est pas échantillonné, il reprend juin
+    # (même repli que orge_model.py : `ndvi_jul = NDVI_jun`).
+    months = np.array([6.0, 7.0, 8.0, 9.0, 10.0])
+    ndvi_curve = np.array(
+        [
+            stats["NDVI_jun"],
+            stats["NDVI_jun"],
+            stats["NDVI_aug"],
+            stats["NDVI_sep"],
+            stats["NDVI_oct"],
+        ],
+        dtype=float,
+    )
+    trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")  # NumPy 1.x : np.trapz
+    stats["ndvi_auc_jun_sep"] = float(trapezoid(ndvi_curve[:4], months[:4]))
+    stats["ndvi_auc_jun_oct"] = float(trapezoid(ndvi_curve, months))
+    stats["months_green_geq04"] = float(int((ndvi_curve >= 0.4).sum()))
+    stats["months_green_geq05"] = float(int((ndvi_curve >= 0.5).sum()))
+    stats["oct_sep_diff"] = stats["NDVI_oct"] - stats["NDVI_sep"]
+    stats["sep_aug_diff"] = stats["NDVI_sep"] - stats["NDVI_aug"]
+    stats["post_peak_green_score"] = float(
+        np.maximum(ndvi_curve[1] - 0.4, 0)
+        + np.maximum(stats["NDVI_aug"] - 0.4, 0)
+        + np.maximum(stats["NDVI_sep"] - 0.4, 0)
+        + np.maximum(stats["NDVI_oct"] - 0.4, 0)
+    )
+    stats["peak_month_late"] = 1.0 if doy_peak > 250 else 0.0
     stats.update(_cycle_features(frame))
 
     row_columns = [*SPECTRAL_BANDS, *VEGETATION_INDICES, "PSRI", "MSI", "month", "day_of_year"]

@@ -125,9 +125,12 @@ def main() -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
+    import joblib  # noqa: PLC0415
+
     selection = source / "threshold_selection.json"
     seuil = json.loads(selection.read_text(encoding="utf-8")).get("seuil_retenu", "?") if selection.is_file() else "?"
-    print(f"  RandomForestClassifier, 48 variables, seuil {seuil} -> OK")
+    bundle = joblib.load(source / "orge_rf.joblib")
+    print(f"  {type(bundle['model']).__name__}, {len(bundle['features'])} variables, seuil {seuil} -> OK")
 
     if args.check:
         divergent = False

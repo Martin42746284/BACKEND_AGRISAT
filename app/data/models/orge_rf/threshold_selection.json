@@ -1,99 +1,99 @@
 {
-  "generated_at": "2026-10-26 11:26:08",
+  "generated_at": "2026-11-03 12:50:25",
   "objectif": {
     "rappel_cible_parcelle": 0.85,
     "niveau": "parcelle (proba moyenne des dates)"
   },
   "evaluation": "GroupKFold(5) par parcelle, predictions hors-echantillon",
-  "auc_roc_observation": 0.822677,
+  "auc_roc_observation": 0.876656,
   "validation_imbriquee": {
     "plis": [
       {
         "pli": 0,
-        "seuil_choisi_hors_pli": 0.2958,
-        "seuil": 0.2958,
-        "n_parcelles_orge": 72,
-        "detectees": 96,
-        "vraies_orge_detectees": 60,
-        "orge_manquees": 12,
-        "fausses_alarmes": 36,
-        "rappel_orge": 0.833333,
-        "precision_orge": 0.625
+        "seuil_choisi_hors_pli": 0.0549,
+        "seuil": 0.0549,
+        "n_parcelles_orge": 60,
+        "detectees": 92,
+        "vraies_orge_detectees": 52,
+        "orge_manquees": 8,
+        "fausses_alarmes": 40,
+        "rappel_orge": 0.866667,
+        "precision_orge": 0.565217
       },
       {
         "pli": 1,
-        "seuil_choisi_hors_pli": 0.2958,
-        "seuil": 0.2958,
-        "n_parcelles_orge": 65,
-        "detectees": 92,
-        "vraies_orge_detectees": 54,
-        "orge_manquees": 11,
-        "fausses_alarmes": 38,
-        "rappel_orge": 0.830769,
-        "precision_orge": 0.586957
+        "seuil_choisi_hors_pli": 0.0755,
+        "seuil": 0.0755,
+        "n_parcelles_orge": 72,
+        "detectees": 83,
+        "vraies_orge_detectees": 57,
+        "orge_manquees": 15,
+        "fausses_alarmes": 26,
+        "rappel_orge": 0.791667,
+        "precision_orge": 0.686747
       },
       {
         "pli": 2,
-        "seuil_choisi_hors_pli": 0.2712,
-        "seuil": 0.2712,
-        "n_parcelles_orge": 50,
-        "detectees": 82,
-        "vraies_orge_detectees": 46,
-        "orge_manquees": 4,
-        "fausses_alarmes": 36,
-        "rappel_orge": 0.92,
-        "precision_orge": 0.560976
+        "seuil_choisi_hors_pli": 0.0549,
+        "seuil": 0.0549,
+        "n_parcelles_orge": 59,
+        "detectees": 83,
+        "vraies_orge_detectees": 51,
+        "orge_manquees": 8,
+        "fausses_alarmes": 32,
+        "rappel_orge": 0.864407,
+        "precision_orge": 0.614458
       },
       {
         "pli": 3,
-        "seuil_choisi_hors_pli": 0.2801,
-        "seuil": 0.2801,
-        "n_parcelles_orge": 72,
-        "detectees": 94,
-        "vraies_orge_detectees": 63,
-        "orge_manquees": 9,
-        "fausses_alarmes": 31,
-        "rappel_orge": 0.875,
-        "precision_orge": 0.670213
+        "seuil_choisi_hors_pli": 0.0524,
+        "seuil": 0.0524,
+        "n_parcelles_orge": 66,
+        "detectees": 98,
+        "vraies_orge_detectees": 58,
+        "orge_manquees": 8,
+        "fausses_alarmes": 40,
+        "rappel_orge": 0.878788,
+        "precision_orge": 0.591837
       },
       {
         "pli": 4,
-        "seuil_choisi_hors_pli": 0.2983,
-        "seuil": 0.2983,
-        "n_parcelles_orge": 59,
-        "detectees": 83,
-        "vraies_orge_detectees": 48,
-        "orge_manquees": 11,
-        "fausses_alarmes": 35,
-        "rappel_orge": 0.813559,
-        "precision_orge": 0.578313
+        "seuil_choisi_hors_pli": 0.0549,
+        "seuil": 0.0549,
+        "n_parcelles_orge": 61,
+        "detectees": 96,
+        "vraies_orge_detectees": 53,
+        "orge_manquees": 8,
+        "fausses_alarmes": 43,
+        "rappel_orge": 0.868852,
+        "precision_orge": 0.552083
       }
     ],
     "rappel_orge": 0.852201,
-    "precision_orge": 0.606264
+    "precision_orge": 0.599558
   },
-  "seuil_retenu": 0.2892,
+  "seuil_retenu": 0.0567,
   "point_de_fonctionnement": {
-    "seuil": 0.2892,
+    "seuil": 0.0567,
     "n_parcelles_orge": 318,
-    "detectees": 448,
+    "detectees": 452,
     "vraies_orge_detectees": 271,
     "orge_manquees": 47,
-    "fausses_alarmes": 177,
+    "fausses_alarmes": 181,
     "rappel_orge": 0.852201,
-    "precision_orge": 0.604911
+    "precision_orge": 0.599558
   },
-  "seuil_precedent": 0.33999999999999997,
+  "seuil_precedent": 0.16999999999999998,
   "point_de_fonctionnement_precedent": {
-    "seuil": 0.34,
+    "seuil": 0.17,
     "n_parcelles_orge": 318,
-    "detectees": 419,
-    "vraies_orge_detectees": 263,
-    "orge_manquees": 55,
-    "fausses_alarmes": 156,
-    "rappel_orge": 0.827044,
-    "precision_orge": 0.627685
+    "detectees": 390,
+    "vraies_orge_detectees": 253,
+    "orge_manquees": 65,
+    "fausses_alarmes": 137,
+    "rappel_orge": 0.795597,
+    "precision_orge": 0.648718
   },
   "applique": true,
-  "sauvegarde": "orge_rf_backup_20261026_112608.joblib"
+  "sauvegarde": "orge_rf_backup_20261103_125025.joblib"
 }

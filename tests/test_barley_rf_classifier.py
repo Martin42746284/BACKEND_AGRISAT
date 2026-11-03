@@ -62,7 +62,7 @@ def test_classify_returns_parcel_probability():
 
     assert result is not None
     assert 0.0 <= result["probability"] <= 1.0
-    assert result["threshold"] == pytest.approx(0.2892)
+    assert result["threshold"] == pytest.approx(0.0567)
     assert result["n_features"] == 64
     assert result["n_observations"] == 12
     assert result["verdict"] in {"ORGE", "A_VERIFIER", "AUTRE_CULTURE"}
@@ -95,7 +95,7 @@ def test_model_artifacts_are_valid_json():
 
     assert bundle is not None
     assert bundle["metrics"].get("generated_at")
-    assert bundle["threshold"] == pytest.approx(0.2892)
+    assert bundle["threshold"] == pytest.approx(0.0567)
 
 
 def test_final_barley_score_examples():
@@ -128,8 +128,8 @@ def test_verdict_uses_final_score_only():
     assert _verdict(0.05, ndvi_oct=0.20, doy_peak=210) == "AUTRE_CULTURE"
 
     # Le seuil « autre culture » du modèle reste celui du RF (et non l'ancien 0.15).
-    assert _verdict(0.30, threshold=0.2892) == "A_VERIFIER"
-    assert _verdict(0.28, threshold=0.2892) == "AUTRE_CULTURE"
+    assert _verdict(0.30, threshold=0.0567) == "A_VERIFIER"
+    assert _verdict(0.05, threshold=0.0567) == "AUTRE_CULTURE"
 
 
 def test_verdict_from_rf_applies_final_score():
