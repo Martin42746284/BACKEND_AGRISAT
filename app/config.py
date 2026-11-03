@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Taille logique d'une tuile Static Maps (max 640) ; scale=2 double les pixels
     # pour une capture simple, scale=1 suffit pour les tuiles de mosaique.
     gemini_capture_size_px: int = 640
+    # Amelioration de la capture avant l'analyse Gemini : off / light / strong.
+    # Meme cadrage et memes dimensions, uniquement contraste local + nettete :
+    # les limites deja visibles ressortent mieux sans georeferencement decale.
+    gemini_capture_enhance: str = "light"
     gemini_timeout_s: float = 150.0
     airbus_oneatlas_api_key: str = ""
     port: int = 3001

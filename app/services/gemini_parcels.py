@@ -39,7 +39,7 @@ import math
 import re
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
@@ -59,6 +59,7 @@ from app.services.gemini_parcels_image import (
     framing_warning,
     parcel_rings_from_red_lines,
 )
+from app.services.image_enhancement import enhance_image_bytes, normalize_mode
 from app.services.parcel_registry import (
     REJECTED_PARCEL_SOURCE,
     load_parcels_in_area,
@@ -885,31 +886,18 @@ async def _post_gemini(
     return response
 
 
-def _preprocess_for_gemini_image(image_bytes: bytes) -> bytes:
-    """Prétraitement ultra-conservateur pour aider à mieux voir les limites déjà visibles.
-    
-    Unsharp mask très léger uniquement. Ne change ni cadrage, ni orientation, ni
-    résolution. N'invente aucune limite.
-    """
-    try:
-        from PIL import Image, ImageFilter
-        import io
+def _preprocess_for_gemini_image(image_bytes: bytes, mode: str | None = None) -> bytes:
+    """Ancien point d'entrée, conservé pour les appels directs.
 
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        # Unsharp mask très léger : renforce uniquement les ruptures déjà visibles
-        enhanced = image.filter(ImageFilter.UnsharpMask(radius=0.8, percent=55, threshold=3))
-        buffer = io.BytesIO()
-        enhanced.save(buffer, format="PNG")
-        return buffer.getvalue()
-    except Exception:
-        # En cas d'échec, renvoyer l'image d'origine
-        return image_bytes
+    La capture est désormais améliorée une seule fois, avant le découpage en
+    fenêtres (voir `detect_parcels_gemini`), pour éviter un double traitement et
+    des contrastes différents entre fenêtres voisines.
+    """
+    return enhance_image_bytes(image_bytes, normalize_mode(mode or settings.gemini_capture_enhance))
 
 
 async def _call_gemini_image(image_bytes: bytes, api_key: str) -> bytes:
     """Demande au modèle image de DESSINER les limites en rouge sur la capture."""
-    # Prétraitement ultra-conservateur pour mieux faire ressortir les limites visibles
-    image_bytes = _preprocess_for_gemini_image(image_bytes)
     model = (settings.gemini_image_model or "gemini-nano-banana-2.1").strip()
     url = GEMINI_ENDPOINT.format(model=model)
     payload = {
@@ -1573,9 +1561,21 @@ async def detect_parcels_gemini(
             capture = await _capture_satellite(latitude, longitude, requested_span, zoom, maps_key)
 
     await _report(progress, 40, "Image satellite capturée")
+    # Amélioration appliquée à la capture ENTIÈRE, avant le découpage en
+    # fenêtres : un contraste calculé fenêtre par fenêtre créerait des
+    # différences visibles dans les zones de chevauchement, donc des limites
+    # incohérentes d'une fenêtre à l'autre. Les dimensions et le cadrage sont
+    # conservés, le géoréférencement reste donc exact.
+    enhancement = normalize_mode(settings.gemini_capture_enhance)
+    analysis_capture = capture
+    if enhancement != "off":
+        await _report(progress, 41, f"Amélioration de la lisibilité ({enhancement})…")
+        enhanced_bytes = enhance_image_bytes(capture.image_bytes, enhancement)
+        if enhanced_bytes is not capture.image_bytes:
+            analysis_capture = replace(capture, image_bytes=enhanced_bytes)
     # Fenêtres haute résolution : la capture d'écran est découpée comme les
     # mosaïques, ce qui divise le mètre par pixel du tracé du modèle.
-    windows = _split_windows(capture)
+    windows = _split_windows(analysis_capture)
     await _report(progress, 42, "Analyse de l’image par Gemini…")
     raw_parcels, raw_windows, failed_windows = await _analyze_windows(
         windows, gemini_key, progress
@@ -1699,6 +1699,7 @@ async def detect_parcels_gemini(
             "size_px": capture.size_px,
             "tiles": capture.tiles,
             "tile_span_m": round(capture.tile_span_m or capture.span_m, 2),
+            "enhancement": enhancement,
             "bounds": {
                 "south": capture.south,
                 "west": capture.west,
