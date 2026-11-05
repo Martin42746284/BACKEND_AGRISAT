@@ -58,11 +58,14 @@ def test_features_have_model_shape_and_no_nan():
 
 
 def test_classify_returns_parcel_probability():
+    from app.services.barley_rf_classifier import THRESHOLD_PATH
+
     result = classify(_series())
+    expected_threshold = json.loads(THRESHOLD_PATH.read_text(encoding="utf-8"))["seuil_retenu"]
 
     assert result is not None
     assert 0.0 <= result["probability"] <= 1.0
-    assert result["threshold"] == pytest.approx(0.0567)
+    assert result["threshold"] == pytest.approx(expected_threshold)
     assert result["n_features"] == 64
     assert result["n_observations"] == 12
     assert result["verdict"] in {"ORGE", "A_VERIFIER", "AUTRE_CULTURE"}
@@ -92,10 +95,11 @@ def test_model_artifacts_are_valid_json():
         json.loads(path.read_text(encoding="utf-8"))
 
     bundle = load_model()
+    expected_threshold = json.loads(THRESHOLD_PATH.read_text(encoding="utf-8"))["seuil_retenu"]
 
     assert bundle is not None
     assert bundle["metrics"].get("generated_at")
-    assert bundle["threshold"] == pytest.approx(0.0567)
+    assert bundle["threshold"] == pytest.approx(expected_threshold)
 
 
 def test_final_barley_score_examples():

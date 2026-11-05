@@ -53,6 +53,10 @@ HF_MODEL_URL = settings.hf_model_url or "https://andritinatonny-agrisat.hf.space
 GOOGLE_MAPS_API_KEY = settings.google_maps_api_key
 
 MIN_BARLEY_CONFIDENCE = 70
+# Le modele HuggingFace (Andriatonny) est temporairement desactive : seul le
+# modele Random Forest de D:\\ASA\\Orge (embarque dans app/data/models/orge_rf/)
+# et le classifieur logistique Sentinel-2 sont utilises pour le verdict.
+_HF_MODEL_DISABLED = True
 # Les appels GEE sont des attentes réseau : menés en série (1), ils allongeaient chaque
 # parcelle de plusieurs dizaines de secondes. Trois en parallèle, et la série mensuelle
 # S2 du classifieur RF tourne en plus en parallèle de la série radar (voir `analyze_parcel`).
@@ -1322,7 +1326,10 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
         planting = detect_planting_date(time_series["s2"], time_series["s1"])
         agro = compute_agro_score(sat_data, planting, time_series)
-        hf_result = await _call_hf_model_safely(satellite_image, warnings) if satellite_image else None
+        # Modele HuggingFace (Andriatonny) desactive : hf_result reste None.
+        # Pour le reactiver, restaurer la ligne ci-dessous et supprimer la suivante :
+        # hf_result = await _call_hf_model_safely(satellite_image, warnings) if satellite_image else None
+        hf_result = None  # desactive volontairement
 
         # Verdict prioritaire : RF saisonnier (modèle entraîné hors-ligne, série S2 12 mois).
         # Replis dans l'ordre : classifieur logistique Sentinel-2 calibré terrain, puis

@@ -13,6 +13,7 @@ from app.db import async_session_maker
 from app.errors import parse_or_400
 from app.models import Parcelle
 from app.schemas import DeleteParcelleParams, ParcelleCreate, ParcelleUpdate
+from app.services.parcel_registry import find_same_parcel_rows
 
 logger = logging.getLogger("agrisat.routes.parcelles")
 
@@ -134,6 +135,10 @@ async def delete_parcelle_culture(parcelle_id: str) -> Response:
     la carte) ; seules les données de culture sont effacées : classification, indice
     de confiance, indices spectraux, cycle cultural, sol, risques, recommandations et
     séries temporelles. L'opération est idempotente.
+
+    Les lignes doublons qui décrivent exactement la même parcelle (contour importé
+    et tracé manuel superposés, réanalyses successives…) sont vidées elles aussi :
+    sinon leur culture réapparaîtrait sur la carte après la suppression.
     """
     try:
         parsed = DeleteParcelleParams.model_validate({"id": parcelle_id})
@@ -146,9 +151,11 @@ async def delete_parcelle_culture(parcelle_id: str) -> Response:
         if existing is None:
             return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
 
+        same_parcel_rows = await find_same_parcel_rows(session, existing)
+        target_ids = {row.id for row in same_parcel_rows} | {parcelle_uuid}
         await session.execute(
             update(Parcelle)
-            .where(Parcelle.id == parcelle_uuid)
+            .where(Parcelle.id.in_(target_ids))
             .values(**{
                 field: [] if field in _CULTURE_LIST_FIELDS else None
                 for field in _CULTURE_FIELDS

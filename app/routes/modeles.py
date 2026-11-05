@@ -24,6 +24,7 @@ import httpx
 from fastapi import APIRouter
 
 from app.config import settings
+from app.services.barley_rf_classifier import load_model as load_barley_model
 
 logger = logging.getLogger("agrisat.routes.modeles")
 
@@ -60,6 +61,18 @@ def _rf_orge_model() -> dict:
         "present": RF_MODEL_PATH.is_file(),
         "statut": "indisponible",
     }
+    # Modèle réellement chargé en mémoire par le processus (et non seulement les
+    # fichiers sur disque) : permet de vérifier que l'application utilise bien la
+    # dernière version après une mise à jour des artefacts joblib.
+    loaded = load_barley_model()
+    if loaded is not None:
+        info["modele_charge"] = {
+            "version": loaded["summary"].get("production_model", "orge_rf"),
+            "seuil": loaded["threshold"],
+            "n_features": len(loaded["features"]),
+            "n_lignes": loaded["summary"].get("trained_on_rows"),
+            "n_parcelles": loaded["summary"].get("trained_on_parcels"),
+        }
     metrics = _read_json(RF_METRICS_PATH)
     selection = _read_json(RF_THRESHOLD_PATH)
     if metrics:

@@ -141,14 +141,78 @@ def nearest_analyzed_parcel(
 ) -> Parcelle | None:
     """Ligne déjà analysée la plus proche du point, si elle est à portée."""
     best: Parcelle | None = None
-    best_distance = tolerance_m
+    best_distance = float("inf")
     for row in rows:
         if not row_has_analysis(row):
             continue
         candidate_distance = distance_m(lat, lng, row.center_lat, row.center_lng)
-        if candidate_distance <= best_distance:
+        if candidate_distance <= _match_tolerance_m(row, tolerance_m) and candidate_distance < best_distance:
             best, best_distance = row, candidate_distance
     return best
+
+
+def _row_area_m2(row: Parcelle) -> float | None:
+    """Surface (m²) du contour d'une ligne, ou None si illisible."""
+    points = row.coordinates
+    if not isinstance(points, list) or len(points) < 3:
+        return None
+    try:
+        meters_per_deg_lng = 111_320 * math.cos((row.center_lat * math.pi) / 180)
+        xs = [(p["lng"] - row.center_lng) * meters_per_deg_lng for p in points]
+        ys = [(p["lat"] - row.center_lat) * 111_320 for p in points]
+    except (KeyError, TypeError):
+        return None
+    area = abs(sum(xs[i] * ys[(i + 1) % len(xs)] - xs[(i + 1) % len(xs)] * ys[i] for i in range(len(xs)))) / 2
+    return area if area > 0 else None
+
+
+def _row_side_m(row: Parcelle) -> float | None:
+    """Côté équivalent (m) du contour d'une ligne, ou None si illisible."""
+    area = _row_area_m2(row)
+    return math.sqrt(area) if area is not None else None
+
+
+# Tolérance stricte des doublons de saisie : seules les lignes qui décrivent le
+# même champ (contour importé + tracé manuel, réanalyses successives…) sont
+# reconnues. Une parcelle voisine, même à quelques mètres, ne doit pas être
+# confondue avec la parcelle ciblée.
+SAME_PARCEL_MAX_CENTER_DISTANCE_M = 2.0
+SAME_PARCEL_MIN_AREA_RATIO = 0.9
+
+
+def rows_are_same_parcel(a: Parcelle, b: Parcelle) -> bool:
+    """Vrai si deux lignes décrivent exactement la même parcelle (doublon)."""
+    if a.id == b.id:
+        return True
+    if distance_m(a.center_lat, a.center_lng, b.center_lat, b.center_lng) > SAME_PARCEL_MAX_CENTER_DISTANCE_M:
+        return False
+    area_a = _row_area_m2(a)
+    area_b = _row_area_m2(b)
+    if area_a is not None and area_b is not None:
+        if min(area_a, area_b) / max(area_a, area_b) < SAME_PARCEL_MIN_AREA_RATIO:
+            return False
+    return True
+
+
+async def find_same_parcel_rows(session, row: Parcelle) -> list[Parcelle]:
+    """Toutes les lignes qui décrivent la même parcelle que `row`, doublons compris."""
+    nearby = await _load_parcels_in_area(
+        session,
+        row.center_lat,
+        row.center_lng,
+        max(SAME_PARCEL_MAX_CENTER_DISTANCE_M * 5, 25.0),
+    )
+    return [candidate for candidate in nearby if rows_are_same_parcel(row, candidate)]
+
+
+def _match_tolerance_m(row: Parcelle, tolerance_m: float) -> float:
+    """Tolérance réduite pour les petites parcelles.
+
+    Deux petites parcelles voisines (< 0,1 ha) ont des centres à moins de 20 m :
+    la tolérance fixe les confondait, et la seconde n'était jamais enregistrée.
+    """
+    side = _row_side_m(row)
+    return tolerance_m if side is None else min(tolerance_m, max(3.0, side * 0.25))
 
 
 def nearest_parcel(

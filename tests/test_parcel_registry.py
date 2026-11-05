@@ -20,6 +20,7 @@ from app.services.parcel_registry import (
     nearest_analyzed_parcel,
     nearest_parcel,
     row_has_analysis,
+    rows_are_same_parcel,
     values_have_analysis,
 )
 
@@ -176,3 +177,32 @@ def test_bbox_deltas_cover_the_disk():
 
 def test_tolerance_is_positive():
     assert ANALYSIS_MATCH_TOLERANCE_M > 0
+
+
+def _square(lat: float, lng: float, side_deg: float = 0.001) -> list[dict[str, float]]:
+    return [
+        {"lat": lat - side_deg, "lng": lng - side_deg},
+        {"lat": lat - side_deg, "lng": lng + side_deg},
+        {"lat": lat + side_deg, "lng": lng + side_deg},
+        {"lat": lat + side_deg, "lng": lng - side_deg},
+    ]
+
+
+def test_rows_describing_the_same_field_are_duplicates():
+    coords = _square(34.0, -6.0)
+    a = _row(coordinates=coords, center_lat=34.0, center_lng=-6.0, culture_detected="Orge")
+    b = _row(coordinates=list(coords), center_lat=34.0, center_lng=-6.0, culture_detected="Orge", label="jecam-vhr")
+    assert rows_are_same_parcel(a, b) is True
+
+
+def test_nearby_parcels_are_not_duplicates():
+    a = _row(coordinates=_square(34.0, -6.0), center_lat=34.0, center_lng=-6.0)
+    # ~11 m plus au nord : parcelle voisine, pas un doublon.
+    b = _row(coordinates=_square(34.0001, -6.0), center_lat=34.0001, center_lng=-6.0)
+    assert rows_are_same_parcel(a, b) is False
+
+
+def test_same_center_with_different_area_is_not_a_duplicate():
+    a = _row(coordinates=_square(34.0, -6.0, 0.001), center_lat=34.0, center_lng=-6.0)
+    b = _row(coordinates=_square(34.0, -6.0, 0.003), center_lat=34.0, center_lng=-6.0)
+    assert rows_are_same_parcel(a, b) is False
