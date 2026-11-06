@@ -1,0 +1,733 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document id="1oG4eLbscfo_lZScarWOIXr4f3eU8SnSZ">
+	<name>1er jour</name>
+	<gx:CascadingStyle kml:id="__managed_style_051EAB897341FD3C45C8_normal">
+		<Style>
+			<IconStyle>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2f2fd3</color>
+				<width>3.2</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<StyleMap id="__managed_style_051EAB897341FD3C45C8">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#__managed_style_051EAB897341FD3C45C8_normal</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#__managed_style_051EAB897341FD3C45C8_highlight</styleUrl>
+		</Pair>
+	</StyleMap>
+	<gx:CascadingStyle kml:id="__managed_style_0A297F46D841FD3C45C7_highlight">
+		<Style>
+			<IconStyle>
+				<scale>1.2</scale>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>4.8</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<gx:CascadingStyle kml:id="__managed_style_051EAB897341FD3C45C8_highlight">
+		<Style>
+			<IconStyle>
+				<scale>1.2</scale>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2f2fd3</color>
+				<width>4.8</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<gx:CascadingStyle kml:id="__managed_style_0A297F46D841FD3C45C7_normal">
+		<Style>
+			<IconStyle>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>3.2</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<StyleMap id="__managed_style_0A297F46D841FD3C45C7">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#__managed_style_0A297F46D841FD3C45C7_normal</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#__managed_style_0A297F46D841FD3C45C7_highlight</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Placemark id="5E69EEE424000001">
+		<name>Parcelle orge 1 stade z32</name>
+		<LookAt>
+			<longitude>47.0120437453341</longitude>
+			<latitude>-19.84903578135768</latitude>
+			<altitude>1486.579406347262</altitude>
+			<heading>1.675855141359785</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>163.853517177904</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01188275305382,-19.84913899280837,0 47.01193393341951,-19.84907258073443,0 47.01185843517639,-19.84901938964692,0 47.01181198978243,-19.84897198632122,0 47.01171218351237,-19.84890161576119,0 47.0116885213485,-19.84891954891458,0 47.01166662925255,-19.84895032955509,0 47.01165668209567,-19.84896673175433,0 47.01174520574314,-19.84903689173575,0 47.0117678889908,-19.8490443907391,0 47.01178511186097,-19.84905862042361,0 47.01180853436522,-19.84907694929024,0 47.01182155453191,-19.84909109209948,0 47.01183767737429,-19.8491102093726,0 47.01188275305382,-19.84913899280837,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000002">
+		<name>Parcelle orge 2 z25</name>
+		<LookAt>
+			<longitude>47.0120437453341</longitude>
+			<latitude>-19.84903578135768</latitude>
+			<altitude>1486.579406347262</altitude>
+			<heading>1.675855141359785</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>163.853517177904</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01193693061264,-19.8490765819542,0 47.01188785668278,-19.8491420782929,0 47.01198409100991,-19.84920395262638,0 47.0120148520746,-19.84922447583391,0 47.01203512039417,-19.84924575639529,0 47.0120531886277,-19.84927104675124,0 47.01209927924975,-19.84930483223772,0 47.01212258409943,-19.84926205243,0 47.01214216852136,-19.84923793226511,0 47.01216792884361,-19.84921797038782,0 47.01214759404268,-19.84919974348005,0 47.01211546021114,-19.84918797156675,0 47.01206102754155,-19.84915286726523,0 47.01201364591409,-19.84912893195332,0 47.01193693061264,-19.8490765819542,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000003">
+		<name>Petit poid</name>
+		<LookAt>
+			<longitude>47.01166493481318</longitude>
+			<latitude>-19.84904497308253</latitude>
+			<altitude>1486.878804632228</altitude>
+			<heading>1.675855141308235</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>163.5541205381742</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01144969357161,-19.84879141968581,0 47.01138517606299,-19.84885437113943,0 47.01155898081382,-19.84899542937627,0 47.01170985670036,-19.8491115275123,0 47.01181698167549,-19.84919914030134,0 47.0119353803077,-19.8493030192745,0 47.01202742300976,-19.84938262028028,0 47.01203709448303,-19.84933646116696,0 47.012056549517,-19.84932031648183,0 47.01206454999023,-19.84929885889434,0 47.01204749103847,-19.84927474098021,0 47.01200758487582,-19.84923306581119,0 47.01188940873454,-19.84915388842926,0 47.01183099450494,-19.84911490291226,0 47.01164957495697,-19.8489684855463,0 47.01144969357161,-19.84879141968581,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000004">
+		<name>Parcelle orge 3 z30</name>
+		<LookAt>
+			<longitude>47.01129833987649</longitude>
+			<latitude>-19.84901480837165</latitude>
+			<altitude>1487.044132277601</altitude>
+			<heading>1.675855141143797</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>178.9610820485905</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01138179579988,-19.8488594032351,0 47.01135974852888,-19.84887061247425,0 47.01132525582398,-19.8489147789703,0 47.01136536564698,-19.84894703393477,0 47.01142135002785,-19.84898294849888,0 47.01149849311651,-19.84904087014003,0 47.0115832912581,-19.84911412390003,0 47.0116892215536,-19.84920741708047,0 47.01177982023565,-19.84929727970351,0 47.01195125668521,-19.84945004760442,0 47.01202078618708,-19.84938496615948,0 47.01181618740492,-19.84920469578225,0 47.01162293216279,-19.84905221448776,0 47.01138179579988,-19.8488594032351,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000005">
+		<name>Parcelle orge 4 z30</name>
+		<LookAt>
+			<longitude>47.01156789100287</longitude>
+			<latitude>-19.84922147806692</latitude>
+			<altitude>1486.735076432754</altitude>
+			<heading>1.67585514106832</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>179.2701437472533</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01131917701149,-19.84891977030021,0 47.0111980093949,-19.84903352150152,0 47.01117896370202,-19.84905986965234,0 47.01122694832054,-19.84909447223446,0 47.0112594379097,-19.84911470167052,0 47.01128591595818,-19.84910791108145,0 47.01135639718886,-19.84915388167894,0 47.01139280214608,-19.84919139457844,0 47.01145756981906,-19.84924048189994,0 47.01149746166017,-19.84927925298942,0 47.01154836044751,-19.84933446251492,0 47.01158852720919,-19.84936799791492,0 47.01168659106407,-19.84923174137118,0 47.01168268474258,-19.84920903368253,0 47.01131917701149,-19.84891977030021,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000006">
+		<name>Petit poid</name>
+		<LookAt>
+			<longitude>47.01189724235274</longitude>
+			<latitude>-19.84944649049936</latitude>
+			<altitude>1486.201407085053</altitude>
+			<heading>1.675855141030908</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>179.8038195613117</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01169793029086,-19.84923164048589,0 47.01159146252257,-19.8493729050146,0 47.01170485953271,-19.8494417350593,0 47.01173953021391,-19.84946749048935,0 47.01177392123708,-19.84950083848984,0 47.01180228015865,-19.84954699310179,0 47.01185345378837,-19.8495991833205,0 47.01189134793298,-19.84963598687474,0 47.01197900761666,-19.84969891706793,0 47.01200581952109,-19.84972342980699,0 47.01209989420182,-19.84958012728767,0 47.01194397940577,-19.84945695381819,0 47.01184793787732,-19.84937231543615,0 47.01177758676924,-19.84931439021993,0 47.01169793029086,-19.84923164048589,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000007">
+		<name>Parcelle orge 5 z30</name>
+		<LookAt>
+			<longitude>47.01189724235274</longitude>
+			<latitude>-19.84944649049936</latitude>
+			<altitude>1486.201407085053</altitude>
+			<heading>1.675855141030908</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>179.8038195613117</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01204033697685,-19.84938191854973,0 47.01195542250467,-19.84945834979493,0 47.01210816498354,-19.8495727901366,0 47.01218883630735,-19.84963876994326,0 47.01225150996709,-19.84969236712678,0 47.0123163207346,-19.84960337370511,0 47.01204033697685,-19.84938191854973,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000008">
+		<name>Petit poid</name>
+		<LookAt>
+			<longitude>47.01231579704005</longitude>
+			<latitude>-19.84978317343824</latitude>
+			<altitude>1485.962362298371</altitude>
+			<heading>1.675855140794909</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.9251520336984</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01200664306561,-19.84973516331666,0 47.01189489036922,-19.84989887458705,0 47.01187253099432,-19.84997475560312,0 47.01191915488893,-19.84997603875408,0 47.01197306988352,-19.85000009520463,0 47.01208815213706,-19.85007223430062,0 47.01214248206038,-19.84999723317182,0 47.01233794871623,-19.84975682125983,0 47.01224120447906,-19.84969521922383,0 47.01210593901709,-19.84958615760995,0 47.01200664306561,-19.84973516331666,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000009">
+		<name>Petit poid</name>
+		<LookAt>
+			<longitude>47.01231579704005</longitude>
+			<latitude>-19.84978317343824</latitude>
+			<altitude>1485.962362298371</altitude>
+			<heading>1.675855140794909</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.9251520336984</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01214632245254,-19.85000235509944,0 47.01209214852463,-19.85007234431447,0 47.01218078333316,-19.85013748544563,0 47.01224998232927,-19.85018453519224,0 47.01230309691258,-19.8501057384337,0 47.01220470859223,-19.85005412330878,0 47.01214632245254,-19.85000235509944,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000A">
+		<name>Parcelle orge 6 z30</name>
+		<LookAt>
+			<longitude>47.01231579704005</longitude>
+			<latitude>-19.84978317343824</latitude>
+			<altitude>1485.962362298371</altitude>
+			<heading>1.675855140794909</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.9251520336984</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01235236817229,-19.84976474230839,0 47.01215431524668,-19.85000257497654,0 47.01219996470055,-19.8500351821851,0 47.01223773849666,-19.85006381058137,0 47.01230462393879,-19.85009951026882,0 47.01236134519458,-19.85003335314889,0 47.01241708497615,-19.84995588272829,0 47.01243976279607,-19.84991261539744,0 47.01247818504835,-19.8498346685961,0 47.01235236817229,-19.84976474230839,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000B">
+		<name>Parcelle orge 7 z30</name>
+		<LookAt>
+			<longitude>47.01231579704005</longitude>
+			<latitude>-19.84978317343824</latitude>
+			<altitude>1485.962362298371</altitude>
+			<heading>1.675855140794909</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.9251520336984</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01226659248888,-19.84969340982816,0 47.01239597693129,-19.84977722868139,0 47.01251117978955,-19.84963116853317,0 47.01237839996461,-19.84952728549498,0 47.01232382021217,-19.84961096419055,0 47.01226659248888,-19.84969340982816,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000C">
+		<name>Parcelle orge 8 z30</name>
+		<LookAt>
+			<longitude>47.01231579704005</longitude>
+			<latitude>-19.84978317343824</latitude>
+			<altitude>1485.962362298371</altitude>
+			<heading>1.675855140794909</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.9251520336984</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.0124836694207,-19.84982980328941,0 47.01252005804264,-19.84977437297595,0 47.01257217350275,-19.84972566167777,0 47.01257430968556,-19.8497018777601,0 47.01256329519656,-19.84967022374605,0 47.01251384398653,-19.8496312418605,0 47.01240263749698,-19.84977741199336,0 47.0124836694207,-19.84982980328941,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000D">
+		<name>Parcelle orge 9 z22</name>
+		<LookAt>
+			<longitude>47.01156200263611</longitude>
+			<latitude>-19.84955563887165</latitude>
+			<altitude>1486.438570825077</altitude>
+			<heading>1.675855140713343</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>208.4489682548519</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01159008579239,-19.84937945413659,0 47.01154574991676,-19.84943701845479,0 47.01160524283807,-19.84949114567919,0 47.01164537319793,-19.84952727359518,0 47.01170759238028,-19.84945140693951,0 47.01159008579239,-19.84937945413659,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000E">
+		<name>Parcelle orge 10 z32</name>
+		<LookAt>
+			<longitude>47.01159520080615</longitude>
+			<latitude>-19.84962515754228</latitude>
+			<altitude>1486.336084772907</altitude>
+			<heading>1.675855139918558</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.6758737231976</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01171160471642,-19.84945581454284,0 47.01165017946204,-19.84953047311483,0 47.01173940626356,-19.84959926434347,0 47.01178881075911,-19.849549599187,0 47.01176565852982,-19.84951339532371,0 47.01171160471642,-19.84945581454284,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400000F">
+		<name>Parcelle orge 11 z12</name>
+		<LookAt>
+			<longitude>47.01174134186456</longitude>
+			<latitude>-19.8496352268072</latitude>
+			<altitude>1486.21133499839</altitude>
+			<heading>1.675855139901592</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.8006155629519</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01179389719415,-19.84955175419668,0 47.01174455458281,-19.84960075402401,0 47.01176807032775,-19.84962488596309,0 47.01179792566771,-19.84965256696635,0 47.01184821469109,-19.84969160687708,0 47.01188703310157,-19.84964091751074,0 47.01179389719415,-19.84955175419668,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000010">
+		<name>Parcelle orge 12 z22</name>
+		<LookAt>
+			<longitude>47.01174134186456</longitude>
+			<latitude>-19.8496352268072</latitude>
+			<altitude>1486.21133499839</altitude>
+			<heading>1.675855139901592</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.8006155629519</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01154110086213,-19.84944138730797,0 47.0114863347442,-19.84953490477396,0 47.01169387517226,-19.84967114458211,0 47.01192591796853,-19.84983904708371,0 47.01196116843855,-19.84978621241928,0 47.01184245190137,-19.84969278796828,0 47.01173876841357,-19.84960328155892,0 47.01163859683497,-19.84952689521294,0 47.01154110086213,-19.84944138730797,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000011">
+		<name>Parcelle orge 13 z37</name>
+		<LookAt>
+			<longitude>47.01174134186456</longitude>
+			<latitude>-19.8496352268072</latitude>
+			<altitude>1486.21133499839</altitude>
+			<heading>1.675855139901592</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.8006155629519</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01148480973866,-19.84953820705149,0 47.01144610993168,-19.84959063849587,0 47.01165952151489,-19.84974397647403,0 47.01170190240221,-19.84968813464399,0 47.01162729640139,-19.84963376513867,0 47.01148480973866,-19.84953820705149,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000012">
+		<name>Parcelle orge 14 z22</name>
+		<LookAt>
+			<longitude>47.01174134186456</longitude>
+			<latitude>-19.8496352268072</latitude>
+			<altitude>1486.21133499839</altitude>
+			<heading>1.675855139901592</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.8006155629519</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01170896167981,-19.84969034616401,0 47.01166442536042,-19.84974679423988,0 47.01185388794034,-19.84987875165688,0 47.01188678201894,-19.8499018630102,0 47.01192789412089,-19.84984448187886,0 47.01170896167981,-19.84969034616401,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000013">
+		<name>Parcelle orge 15 z22</name>
+		<LookAt>
+			<longitude>47.01144023419585</longitude>
+			<latitude>-19.84935131439973</latitude>
+			<altitude>1486.741088998255</altitude>
+			<heading>1.675855139741287</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>111.270868351985</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01135735041483,-19.84923464424565,0 47.01131997902606,-19.84929702457522,0 47.01124357055285,-19.84941165157619,0 47.01126019850862,-19.8494332890285,0 47.01128002993223,-19.8494495468209,0 47.01130584364735,-19.84946484577546,0 47.0113314564183,-19.8494835344595,0 47.01135602834961,-19.84949770819519,0 47.0113863156678,-19.84951770440472,0 47.01145642216019,-19.84956358965094,0 47.01147933295309,-19.84953599493797,0 47.01153640742826,-19.84943925430059,0 47.01158332996865,-19.84937164040815,0 47.01151401557941,-19.84930831348952,0 47.01149827110554,-19.84928918706789,0 47.01148344484538,-19.84928612420034,0 47.01145200245231,-19.84924601134773,0 47.01138405811628,-19.84919612729758,0 47.01135735041483,-19.84923464424565,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000014">
+		<name>Parcelle orge 16 z32</name>
+		<LookAt>
+			<longitude>47.01162310351923</longitude>
+			<latitude>-19.84962390191403</latitude>
+			<altitude>1486.279836694618</altitude>
+			<heading>1.675855139624483</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.7209050722195</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01144453655122,-19.84959592166546,0 47.01140810361165,-19.84965230114954,0 47.01143737955304,-19.84967112087971,0 47.01146415915166,-19.84969548167509,0 47.01150389609136,-19.84972363619688,0 47.01154810465487,-19.84976322063177,0 47.0115793549773,-19.84979791722893,0 47.01161829448483,-19.84981701777791,0 47.01165862852267,-19.84975277266173,0 47.01144453655122,-19.84959592166546,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000015">
+		<name>Parcelle orge 17 z22</name>
+		<LookAt>
+			<longitude>47.01162310351923</longitude>
+			<latitude>-19.84962390191403</latitude>
+			<altitude>1486.279836694618</altitude>
+			<heading>1.675855139624483</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.7209050722195</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01166813414319,-19.84975528784505,0 47.01162906723505,-19.84981731424796,0 47.01172301553433,-19.8498809566883,0 47.01183194923203,-19.84996404414052,0 47.01184723925927,-19.84997584506035,0 47.01186519365756,-19.84997984461388,0 47.01188308878818,-19.84990701555762,0 47.01166813414319,-19.84975528784505,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000016">
+		<name>Raygrasse</name>
+		<LookAt>
+			<longitude>47.01166161449363</longitude>
+			<latitude>-19.84938538489344</latitude>
+			<altitude>1486.46063876433</altitude>
+			<heading>1.675855139588377</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.5401082084136</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01124060539667,-19.84941924653589,0 47.01120958372376,-19.84945766894601,0 47.01119991411087,-19.84950004546356,0 47.01118076152515,-19.8495410323149,0 47.01122187137162,-19.84956124722234,0 47.01126997568287,-19.84957953248924,0 47.01131187915061,-19.84960556576519,0 47.01140220287764,-19.84964994354315,0 47.01145152173766,-19.84956684413874,0 47.01124060539667,-19.84941924653589,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000017">
+		<name>Raygrasse</name>
+		<LookAt>
+			<longitude>47.01166161449363</longitude>
+			<latitude>-19.84938538489344</latitude>
+			<altitude>1486.46063876433</altitude>
+			<heading>1.675855139588377</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.5401082084136</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01111200718713,-19.84942352516481,0 47.01106701304476,-19.84949848474721,0 47.01116174708855,-19.84954159969177,0 47.01118876087895,-19.84947505061208,0 47.01123727331764,-19.84941129967635,0 47.01137759215595,-19.84918832584181,0 47.01132758074977,-19.84915456276572,0 47.01111200718713,-19.84942352516481,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000018">
+		<name>Raygrasse</name>
+		<LookAt>
+			<longitude>47.01121078007232</longitude>
+			<latitude>-19.8495649719991</latitude>
+			<altitude>1487.044133894545</altitude>
+			<heading>1.67585513954705</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>186.9566005557317</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_051EAB897341FD3C45C8</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01090723904395,-19.84948437218932,0 47.01089935767489,-19.84950880104993,0 47.01090851365877,-19.84956281121661,0 47.01087176628418,-19.84962678548534,0 47.01122440156559,-19.84981894473747,0 47.01124149091375,-19.84973053240814,0 47.01130138088108,-19.84960960345452,0 47.01117794581257,-19.84954667586227,0 47.01104815040217,-19.84950726345094,0 47.01090723904395,-19.84948437218932,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE424000019">
+		<name>Parcelle orge 18 z22</name>
+		<LookAt>
+			<longitude>47.01116428618572</longitude>
+			<latitude>-19.84963468178116</latitude>
+			<altitude>1486.916142358441</altitude>
+			<heading>1.675855139529431</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.0845988481961</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01131090661612,-19.84961099421822,0 47.0112923101355,-19.84963296584063,0 47.01128512407492,-19.84967211459031,0 47.01124725402506,-19.84973744180897,0 47.01124054737926,-19.84976086275254,0 47.01123280044627,-19.84981806954798,0 47.01150161828158,-19.84995890883332,0 47.01153050793273,-19.84987744635717,0 47.01157242407373,-19.84980084983275,0 47.0115410452259,-19.84976614618652,0 47.01150231868375,-19.8497334811837,0 47.01140646655324,-19.84965541016059,0 47.01132254139721,-19.84961824227365,0 47.01131090661612,-19.84961099421822,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400001A">
+		<name>Parcelle orge 19 z22</name>
+		<LookAt>
+			<longitude>47.01158667594223</longitude>
+			<latitude>-19.84989328046818</latitude>
+			<altitude>1486.258902514007</altitude>
+			<heading>1.67585513945874</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.741846033241</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01153293510909,-19.84988785771704,0 47.01150531233332,-19.84996710118319,0 47.01184834506036,-19.85012226438737,0 47.01189157729072,-19.85012119680023,0 47.01191251412131,-19.85006533945514,0 47.01153293510909,-19.84988785771704,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+	<Placemark id="5E69EEE42400001B">
+		<name>Parcelle orge 20 z32</name>
+		<LookAt>
+			<longitude>47.01158667594223</longitude>
+			<latitude>-19.84989328046818</latitude>
+			<altitude>1486.258902514007</altitude>
+			<heading>1.67585513945874</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>187.741846033241</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_0A297F46D841FD3C45C7</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						47.01195168053298,-19.85000208315687,0 47.01191731000108,-19.85006547144052,0 47.01189009780825,-19.85013018535543,0 47.01200418529802,-19.85020443093386,0 47.01214422651336,-19.85027795828772,0 47.01224231268263,-19.85018728158744,0 47.01195168053298,-19.85000208315687,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+</Document>
+</kml>

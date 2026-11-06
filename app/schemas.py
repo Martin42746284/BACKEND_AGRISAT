@@ -23,12 +23,22 @@ MAX_TRACED_PARCELS = 2_000
 
 
 class TracedParcel(BaseModel):
-    """Parcelle déjà tracée à l'écran (modèle JECAM-VHR), envoyée par le frontend pour être classée."""
+    """Parcelle à classer : contour tracé à l'écran (JECAM-VHR) ou ligne déjà
+    enregistrée dans `parcelles` (import KML, tracé manuel).
+
+    `id` est l'identifiant de la ligne en base : quand il est fourni, l'analyse
+    met cette ligne à jour au lieu de créer un doublon au même endroit. Il reste
+    absent pour les contours qui n'existent qu'à l'écran.
+    """
 
     coordinates: list[Point] = Field(min_length=3, max_length=5_000)
+    id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"coordinates": [point.model_dump() for point in self.coordinates]}
+        return {
+            "id": self.id,
+            "coordinates": [point.model_dump() for point in self.coordinates],
+        }
 
 
 class AnalyzeSimpleRequest(BaseModel):
@@ -157,6 +167,62 @@ class AnalyzeLatestQuery(BaseModel):
     _v = field_validator("lat", "lng")(_finite)
 
 
+class AnalyzeParcelRequest(BaseModel):
+    """Analyse d'une seule parcelle (bouton « Analyser » du frontend).
+
+    Le contour est obligatoire : l'analyse porte sur cette parcelle uniquement,
+    jamais sur les parcelles voisines. `parcel_id` identifie la ligne à mettre à
+    jour dans `parcelles` ; s'il est absent (contour tracé à l'écran, pas encore
+    en base), la ligne est créée.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    zoom: float | None = Field(default=None, ge=1, le=21)
+    polygon: list[Point] = Field(min_length=3, max_length=5_000)
+    parcel_id: str | None = Field(default=None, alias="parcelId")
+    force: bool = False
+
+    _v = field_validator("lat", "lng")(_finite)
+
+
+class GeminiViewportBounds(BaseModel):
+    south: float = Field(ge=-90, le=90)
+    west: float = Field(ge=-180, le=180)
+    north: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+
+    _v = field_validator("south", "west", "north", "east")(_finite)
+
+
+class GeminiParcelsRequest(BaseModel):
+    """Capture satellite (zone écran visible ou rayon autour d'un point) et détection Gemini.
+
+    Si `viewport_width` et `viewport_height` (ou `bounds`) sont fournis, la capture
+    couvre exactement l'intégralité du champ de vision visible à l'écran.
+    Sinon, `span_m` et `tile_span_m` définissent la zone capturée autour du centre.
+    """
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    span_m: float | None = Field(default=None, ge=10.0, le=10000.0)
+    tile_span_m: float | None = Field(default=None, ge=10.0, le=10000.0)
+    zoom: int | None = Field(default=None, ge=10, le=22)
+    persist: bool = True
+    viewport_width: int | None = Field(default=None, ge=100, le=4000)
+    viewport_height: int | None = Field(default=None, ge=100, le=4000)
+    bounds: GeminiViewportBounds | None = None
+
+    _v = field_validator("latitude", "longitude")(_finite)
+
+    @field_validator("span_m", "tile_span_m")
+    @classmethod
+    def _finite_span(cls, value: float | None) -> float | None:
+        return None if value is None else _finite(value)
+
+
 class DeleteParcelleParams(BaseModel):
     id: str
 
@@ -173,14 +239,59 @@ class DeleteParcelleParams(BaseModel):
 
 
 class ParcelleUpdate(BaseModel):
-    """Champs modifiables lors d'une correction humaine sur une parcelle."""
+    """Champs modifiables d'une parcelle : correction humaine de la culture, ou
+    nouveau contour après une scission manuelle d'une parcelle fusionnée."""
+
     culture_detected: str | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=100.0)
     verdict: str | None = None
     details: str | None = None
     saison: str | None = None
 
+    # Contour : une parcelle scindée conserve sa ligne en base mais n'en garde
+    # qu'une partie ; centre et superficie suivent le nouveau contour.
+    coordinates: list[Point] | None = Field(default=None, min_length=3, max_length=5_000)
+    center_lat: float | None = Field(default=None, ge=-90, le=90)
+    center_lng: float | None = Field(default=None, ge=-180, le=180)
+    surface_ha: float | None = Field(default=None, ge=0)
+
     model_config = ConfigDict(populate_by_name=True)
+
+    _v_coords = field_validator("center_lat", "center_lng", "surface_ha")(
+        lambda v: _finite(v) if v is not None else v
+    )
+
+
+class BorneGpsCreate(BaseModel):
+    """Borne GPS placée sur la carte."""
+
+    name: str = Field(min_length=1, max_length=120)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+    _v = field_validator("lat", "lng")(_finite)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("ne doit pas être vide")
+        return name
+
+
+class BorneGpsUpdate(BaseModel):
+    """Renommage d'une borne GPS existante."""
+
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("ne doit pas être vide")
+        return name
 
 
 class AuditEntryCreate(BaseModel):

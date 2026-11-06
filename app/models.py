@@ -66,6 +66,23 @@ class Parcelle(Base):
     __table_args__ = (Index("parcelles_center_lat_center_lng_idx", "center_lat", "center_lng"),)
 
 
+class BorneGps(Base):
+    """Point de repère GPS nommé, placé par l'utilisateur sur la carte."""
+
+    __tablename__ = "bornes_gps"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (Index("bornes_gps_name_idx", "name"),)
+
+
 class FieldScanRun(Base):
     __tablename__ = "field_scan_runs"
 

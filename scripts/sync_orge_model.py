@@ -82,10 +82,10 @@ def _validate(joblib_path: Path, source_dir: Path) -> list[str]:
 
     model = bundle["model"]
     features = [str(name) for name in bundle.get("features") or []]
-    if type(model).__name__ != "RandomForestClassifier":
-        errors.append(f"estimateur {type(model).__name__} au lieu de RandomForestClassifier")
-    if len(features) != 48:
-        errors.append(f"{len(features)} variables au lieu de 48")
+    if type(model).__name__ not in ("RandomForestClassifier", "HistGradientBoostingClassifier"):
+        errors.append(f"estimateur {type(model).__name__} non pris en charge")
+    if len(features) not in (48, 53, 56, 64):
+        errors.append(f"{len(features)} variables au lieu de 48, 53, 56 ou 64")
 
     expected = _source_features(source_dir)
     if expected is not None and expected != features:
@@ -125,9 +125,12 @@ def main() -> int:
         for error in errors:
             print(f"  - {error}")
         return 1
+    import joblib  # noqa: PLC0415
+
     selection = source / "threshold_selection.json"
     seuil = json.loads(selection.read_text(encoding="utf-8")).get("seuil_retenu", "?") if selection.is_file() else "?"
-    print(f"  RandomForestClassifier, 48 variables, seuil {seuil} -> OK")
+    bundle = joblib.load(source / "orge_rf.joblib")
+    print(f"  {type(bundle['model']).__name__}, {len(bundle['features'])} variables, seuil {seuil} -> OK")
 
     if args.check:
         divergent = False

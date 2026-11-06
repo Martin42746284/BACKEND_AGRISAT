@@ -5,7 +5,7 @@ Google Earth Engine partagé par automatic_parcels.py, barley_detect_simple.py,
 zoning.py et app/routes/sentinel_tiles.py (mêmes primitives : auth, gee_call/
 gee_constant, add_spectral_index, capture d'images, fetch_with_retry).
 
-Verdict orge / non-orge, par ordre de priorité :
+Verdict orge / autre culture, par ordre de priorité :
 1. Classifieur RF orge (barley_rf_classifier.py, modèle du projet ASA/Orge :
    48 variables spectrales-temporelles sur 12 mois de série Sentinel-2,
    probabilité moyenne au niveau parcelle) ;
@@ -38,10 +38,12 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
 
 from app.config import settings
+from app.logging_setup import redact_api_keys
 from app.services.barley_rf_classifier import classify as classify_barley_rf
 from app.services.barley_s2_classifier import classify as classify_barley_s2
 from app.services.barley_rf_classifier import load_model as load_barley_rf
 from app.services.field_watershed import lng_lat_to_mercator_meters
+from app.services.orge_scoring import CONFIRM_THRESHOLD_PCT, final_barley_score, is_barley_confirmed
 # s2_time_series importe les primitives GEE de ce module : import paresseux dans
 # analyze_parcel() pour éviter l'import circulaire (comme zoning.py / automatic_parcels.py).
 
@@ -51,10 +53,26 @@ HF_MODEL_URL = settings.hf_model_url or "https://andritinatonny-agrisat.hf.space
 GOOGLE_MAPS_API_KEY = settings.google_maps_api_key
 
 MIN_BARLEY_CONFIDENCE = 70
-TIME_SERIES_CONCURRENCY = 1
+# Le modele HuggingFace (Andriatonny) est temporairement desactive : seul le
+# modele Random Forest de D:\\ASA\\Orge (embarque dans app/data/models/orge_rf/)
+# et le classifieur logistique Sentinel-2 sont utilises pour le verdict.
+_HF_MODEL_DISABLED = True
+# Les appels GEE sont des attentes réseau : menés en série (1), ils allongeaient chaque
+# parcelle de plusieurs dizaines de secondes. Trois en parallèle, et la série mensuelle
+# S2 du classifieur RF tourne en plus en parallèle de la série radar (voir `analyze_parcel`).
+TIME_SERIES_CONCURRENCY = 3
 GEE_COMPUTE_TIMEOUT_S = 60.0
 EXTERNAL_REQUEST_TIMEOUT_S = 30.0
 RETRY_DELAYS_S = (0.25, 1.0)
+
+
+def detected_culture_label(is_barley: bool) -> str:
+    """Classe de culture enregistrée pour une parcelle.
+
+    L'application ne connaît que deux issues : « Orge » et « Autre culture ».
+    L'ancien statut binaire « NON_ORGE » n'existe pas dans l'application.
+    """
+    return "Orge" if is_barley else "Autre culture"
 
 
 def js_round(x: float) -> int:
@@ -91,7 +109,7 @@ async def fetch_with_retry(method: str, url: str, *, timeout_s: float, **kwargs:
 
 
 def _error_message(error: BaseException) -> str:
-    return str(error) or "erreur réseau inconnue"
+    return redact_api_keys(str(error)) or "erreur réseau inconnue"
 
 
 # ── GEE Auth ──
@@ -416,7 +434,17 @@ async def capture_parcel_image(lat: float, lng: float, zoom: float, polygon: Any
         path = "|".join(f"{p['lat']},{p['lng']}" for p in parcel_polygon)
         params["path"] = f"color:0xfbbf24ff|weight:2|{path}"
 
-    resp = await fetch_with_retry("GET", "https://maps.googleapis.com/maps/api/staticmap", params=params, timeout_s=EXTERNAL_REQUEST_TIMEOUT_S)
+    try:
+        resp = await fetch_with_retry(
+            "GET",
+            "https://maps.googleapis.com/maps/api/staticmap",
+            params=params,
+            timeout_s=EXTERNAL_REQUEST_TIMEOUT_S,
+        )
+    except Exception as error:  # noqa: BLE001 — ne jamais exposer l'URL (elle contient la clé)
+        raise RuntimeError(
+            f"Capture satellite injoignable ({type(error).__name__})."
+        ) from error
     if resp.status_code >= 400:
         raise RuntimeError(f"Google Maps Static API error: {resp.status_code}")
     return base64.b64encode(resp.content).decode("ascii")
@@ -470,7 +498,7 @@ async def _call_hf_model_safely(image_base64: str, warnings: list[str]) -> HFMod
         return await call_hf_model(image_base64)
     except Exception as error:  # noqa: BLE001
         warnings.append(f"Modèle Hugging Face indisponible : {_error_message(error)}")
-        logger.warning("[CLASSIFICATION] Modèle indisponible : %s", error)
+        logger.warning("[CLASSIFICATION] Modèle indisponible : %s", _error_message(error))
         return None
 
 
@@ -755,17 +783,14 @@ async def map_with_concurrency(items: list[T], concurrency: int, mapper: Callabl
     return results  # type: ignore[return-value]
 
 
-async def _fetch_time_series(access_token: str, project_id: str, polygon: Any) -> dict[str, list[dict[str, Any]]]:
-    months = get_monthly_ranges(6)
+async def _fetch_s1_time_series(access_token: str, project_id: str, polygon: Any) -> list[dict[str, Any]]:
+    """Série radar S1 (6 mois) de la parcelle, pour l'affichage.
 
-    async def s2_mapper(m: dict[str, str]) -> dict[str, Any]:
-        result = await call_gee_compute(access_token, project_id, _build_s2_expression(m["start"], m["end"], polygon))
-        ndvi = None
-        if result:
-            bands = _parse_s2_bands(result)
-            if bands["nir"] is not None and bands["red"] is not None and (bands["nir"] + bands["red"]) != 0:
-                ndvi = js_round(((bands["nir"] - bands["red"]) / (bands["nir"] + bands["red"])) * 1000) / 10
-        return {"date": m["label"], "ndvi": ndvi, "cloud_cover": None}
+    La série S2 n'est plus calculée ici : `fetch_s2_monthly_series` (12 mois, requise
+    par le classifieur RF) tourne en parallèle et ses 6 derniers mois alimentent
+    l'affichage via `_s2_display_series` — 6 appels GEE par parcelle économisés.
+    """
+    months = get_monthly_ranges(6)
 
     async def s1_mapper(m: dict[str, str]) -> dict[str, Any]:
         result = await call_gee_compute(access_token, project_id, _build_s1_expression(m["start"], m["end"], polygon))
@@ -778,9 +803,24 @@ async def _fetch_time_series(access_token: str, project_id: str, polygon: Any) -
                 vh = js_round(parsed["vh"] * 100) / 100
         return {"date": m["label"], "vv": vv, "vh": vh}
 
-    s2 = await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s2_mapper)
-    s1 = await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s1_mapper)
-    return {"s2": s2, "s1": s1}
+    return await map_with_concurrency(months, TIME_SERIES_CONCURRENCY, s1_mapper)
+
+
+def _s2_display_series(monthly_rows: list[dict[str, Any]], months: int = 6) -> list[dict[str, Any]]:
+    """Série S2 d'affichage (6 derniers mois) dérivée de la série mensuelle du RF.
+
+    Le NDVI est ramené en pourcentage à une décimale comme le faisait l'ancien
+    `s2_mapper` (`js_round(ratio * 1000) / 10`), pour ne rien changer aux graphes.
+    """
+    rows: list[dict[str, Any]] = []
+    for row in monthly_rows[-months:]:
+        ndvi = row.get("NDVI")
+        rows.append({
+            "date": row.get("date"),
+            "ndvi": js_round(ndvi * 1000) / 10 if isinstance(ndvi, (int, float)) and math.isfinite(ndvi) else None,
+            "cloud_cover": None,
+        })
+    return rows
 
 
 async def _fetch_precipitation_time_series(lat: float, lng: float, months: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -994,37 +1034,59 @@ def compute_agro_score(sat_data: dict[str, Any], planting: dict[str, Any], time_
 
 def compute_hybrid_score(cnn_confidence: float, cnn_is_barley: bool, agro_score: float) -> dict[str, Any]:
     cnn_score = cnn_confidence if cnn_is_barley else (100 - cnn_confidence)
-    hybrid_score = js_round(cnn_score * 0.6 + agro_score * 0.4)
+    raw_score = js_round(cnn_score * 0.6 + agro_score * 0.4)
 
     disagreement = abs(cnn_score - agro_score)
     penalty = disagreement * 0.08 if disagreement > 55 else 0
-    final_confidence = max(0, min(100, js_round(hybrid_score - penalty)))
 
-    # Seulement deux catégories : ORGE CONFIRMÉ vs NON-ORGE. Seuil à 50% (corrigé lors de
-    # l'audit du portage Python — le code source TS portait `> 44` mais son propre
-    # commentaire documentait l'intention `> 50` : "Remonté à 50% (depuis 43%)... 50% exige
-    # une vraie majorité"; décision utilisateur du 2026-09-04 de suivre l'intention
-    # documentée). Un score Agro élevé (souvent 70-95%, ses composantes retombant sur des
-    # valeurs neutres généreuses quand une donnée manque) suffisait seul à faire basculer en
-    # orge même quand le CNN penchait pour non-orge — 50% exige une vraie majorité CNN+Agro
-    # en faveur de l'orge.
-    final_is_barley = hybrid_score > 50
+    # Le score d'orge final suit la règle +10 sous 70 % / ≥60 % (orge_scoring.py).
+    # Le seuil existant (>50 %) est conservé.
+    final_is_barley = raw_score > 50
+    final_score = js_round(final_barley_score(raw_score)) if final_is_barley else raw_score
+    final_confirmed = final_is_barley and final_score >= CONFIRM_THRESHOLD_PCT
+    final_confidence = max(0, min(100, js_round(final_score - penalty)))
 
-    verdict = "✅ ORGE CONFIRMÉE — CNN + Règles agro concordent" if final_is_barley else "❌ NON-ORGE — CNN + Règles agro concordent"
+    if final_confirmed:
+        verdict = f"✅ ORGE CONFIRMÉE — CNN + Règles agro concordent (score final {final_score}%)"
+    elif final_is_barley:
+        verdict = f"⚠️ ORGE À VÉRIFIER — CNN + Règles agro concordent (score final {final_score}%)"
+    else:
+        verdict = f"Autre culture — CNN + Règles agro concordent (score {raw_score}%)"
     if disagreement > 55:
         verdict += f" (⚠️ désaccord CNN/Agro: {disagreement:.0f}%)"
 
-    return {"hybrid_score": hybrid_score, "final_is_barley": final_is_barley, "final_verdict": verdict, "final_confidence": final_confidence}
+    return {
+        "hybrid_score": final_score,
+        "final_is_barley": final_is_barley,
+        "final_confirmed": final_confirmed,
+        "final_verdict": verdict,
+        "final_confidence": final_confidence,
+    }
 
 
 def create_agro_only_hybrid_score(agro_score: float) -> dict[str, Any]:
     final_is_barley = agro_score > 50
-    verdict = (
-        f"⚠️ ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
-        if final_is_barley
-        else f"⚠️ NON-ORGE PROBABLE (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
-    )
-    return {"hybrid_score": agro_score, "final_is_barley": final_is_barley, "final_verdict": verdict, "final_confidence": agro_score}
+    final_score = js_round(final_barley_score(agro_score)) if final_is_barley else agro_score
+    final_confirmed = final_is_barley and final_score >= CONFIRM_THRESHOLD_PCT
+    if final_confirmed:
+        verdict = (
+            f"✅ ORGE CONFIRMÉE (CNN indisponible, estimation agro seule) — "
+            f"Score agro {agro_score}% → score final {final_score}%"
+        )
+    elif final_is_barley:
+        verdict = (
+            f"⚠️ ORGE À VÉRIFIER (CNN indisponible, estimation agro seule) — "
+            f"Score agro {agro_score}% → score final {final_score}%"
+        )
+    else:
+        verdict = f"Autre culture probable (CNN indisponible, estimation agro seule) — Score agro {agro_score}%"
+    return {
+        "hybrid_score": final_score,
+        "final_is_barley": final_is_barley,
+        "final_confirmed": final_confirmed,
+        "final_verdict": verdict,
+        "final_confidence": final_score,
+    }
 
 
 # ── Season detection ──
@@ -1095,21 +1157,26 @@ def rf_calibration_note() -> str:
 
 def verdict_from_rf(rf: dict[str, Any]) -> dict[str, Any]:
     """Même forme que verdict_from_s2, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte la probabilité d'orge du RF saisonnier."""
+    hybrid_score porte le score final d'orge (probabilité RF +10 points sous 70 %)."""
     probability = rf["probability"]
     pct = js_round(probability * 100)
-    level = rf.get("verdict")
     if not rf["is_barley"]:
-        verdict = f"❌ NON-ORGE — RF Orge (probabilité d'orge {pct}%)"
-    elif level == "ORGE":
-        verdict = f"✅ ORGE CONFIRMÉE — RF Orge (probabilité d'orge {pct}%)"
+        final_score = pct
+        final_confirmed = False
+        verdict = f"Autre culture — RF Orge (probabilité d'orge {pct}%)"
+        final_confidence = js_round(max(probability, 1 - probability) * 100)
     else:
-        verdict = f"⚠️ ORGE À VÉRIFIER — RF Orge (probabilité d'orge {pct}%)"
+        final_score = js_round(final_barley_score(pct))
+        final_confirmed = is_barley_confirmed(pct)
+        label = "✅ ORGE CONFIRMÉE" if final_confirmed else "⚠️ ORGE À VÉRIFIER"
+        verdict = f"{label} — RF Orge (probabilité d'orge {pct}% → score final {final_score}%)"
+        final_confidence = final_score
     return {
-        "hybrid_score": pct,
+        "hybrid_score": final_score,
         "final_is_barley": rf["is_barley"],
+        "final_confirmed": final_confirmed,
         "final_verdict": verdict,
-        "final_confidence": js_round(max(probability, 1 - probability) * 100),
+        "final_confidence": final_confidence,
     }
 
 
@@ -1129,8 +1196,8 @@ def _rf_barley_segment(polygon: list[LatLng], rf: dict[str, Any], ndvi_percentag
 
 # ── Verdict par le classifieur Sentinel-2 (app/services/barley_s2_classifier.py) ──
 
-# Repère, dans data_source, les analyses dont hybrid_score porte la probabilité d'orge
-# Sentinel-2 (et non plus 0,6 × CNN + 0,4 × agro) : le frontend adapte son libellé.
+# Repère, dans data_source, les analyses dont hybrid_score porte le score final d'orge
+# dérivé de Sentinel-2 (et non plus 0,6 × CNN + 0,4 × agro) : le frontend adapte son libellé.
 S2_CLASSIFIER_SOURCE = "Classifieur orge Sentinel-2"
 
 
@@ -1147,19 +1214,26 @@ def s2_calibration_note(s2: dict[str, Any]) -> str:
 
 def verdict_from_s2(s2: dict[str, Any]) -> dict[str, Any]:
     """Même forme que compute_hybrid_score, pour le reste de l'analyse et l'enregistrement.
-    hybrid_score porte désormais la probabilité d'orge Sentinel-2."""
+    hybrid_score porte le score final d'orge (probabilité S2 +10 points sous 70 %)."""
     probability = s2["probability"]
     pct = js_round(probability * 100)
-    verdict = (
-        f"✅ ORGE CONFIRMÉE — Sentinel-2 (probabilité d'orge {pct}%)"
-        if s2["is_barley"]
-        else f"❌ NON-ORGE — Sentinel-2 (probabilité d'orge {pct}%)"
-    )
+    if not s2["is_barley"]:
+        final_score = pct
+        final_confirmed = False
+        verdict = f"Autre culture — Sentinel-2 (probabilité d'orge {pct}%)"
+        final_confidence = js_round(max(probability, 1 - probability) * 100)
+    else:
+        final_score = js_round(final_barley_score(pct))
+        final_confirmed = is_barley_confirmed(pct)
+        label = "✅ ORGE CONFIRMÉE" if final_confirmed else "⚠️ ORGE À VÉRIFIER"
+        verdict = f"{label} — Sentinel-2 (probabilité d'orge {pct}% → score final {final_score}%)"
+        final_confidence = final_score
     return {
-        "hybrid_score": pct,
+        "hybrid_score": final_score,
         "final_is_barley": s2["is_barley"],
+        "final_confirmed": final_confirmed,
         "final_verdict": verdict,
-        "final_confidence": js_round(max(probability, 1 - probability) * 100),
+        "final_confidence": final_confidence,
     }
 
 
@@ -1216,20 +1290,31 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             except Exception as error:  # noqa: BLE001
                 warnings.append(f"GEE indisponible : {_error_message(error)}")
 
+        # Série mensuelle S2 (12 mois) lancée avec le reste : elle sert à la fois au
+        # classifieur RF et à la série d'affichage (ses 6 derniers mois).
+        from app.services.s2_time_series import fetch_s2_monthly_series
+
         snapshot_task = _fetch_current_snapshot(access_token, lat, lng, project_id, parcel_polygon) if access_token else _resolved(None)
-        time_series_task = _fetch_time_series(access_token, project_id, parcel_polygon) if access_token else _resolved(None)
+        s1_task = _fetch_s1_time_series(access_token, project_id, parcel_polygon) if access_token else _resolved(None)
+        s2_monthly_task = fetch_s2_monthly_series(access_token, project_id, parcel_polygon) if access_token else _resolved([])
         rain_task = _fetch_precipitation_time_series(lat, lng, get_monthly_ranges(6))
 
-        snapshot_result, time_series_result, rain_result = await asyncio.gather(snapshot_task, time_series_task, rain_task, return_exceptions=True)
+        snapshot_result, s1_result, s2_monthly_result, rain_result = await asyncio.gather(
+            snapshot_task, s1_task, s2_monthly_task, rain_task, return_exceptions=True,
+        )
 
         sat_data = snapshot_result if snapshot_result and not isinstance(snapshot_result, BaseException) else _create_empty_satellite_data()
-        time_series = time_series_result if time_series_result and not isinstance(time_series_result, BaseException) else {"s2": [], "s1": []}
+        s2_monthly: list[dict[str, Any]] = s2_monthly_result if isinstance(s2_monthly_result, list) and s2_monthly_result else []
+        s1_rows: list[dict[str, Any]] = s1_result if isinstance(s1_result, list) else []
+        time_series = {"s2": _s2_display_series(s2_monthly), "s1": s1_rows}
         time_series_rain = rain_result if not isinstance(rain_result, BaseException) else []
 
         if isinstance(snapshot_result, BaseException):
             warnings.append(f"Sentinel-2 indisponible : {_error_message(snapshot_result)}")
-        if isinstance(time_series_result, BaseException):
-            warnings.append(f"Séries temporelles indisponibles : {_error_message(time_series_result)}")
+        if isinstance(s1_result, BaseException):
+            warnings.append(f"Séries radar indisponibles (S1) : {_error_message(s1_result)}")
+        if isinstance(s2_monthly_result, BaseException):
+            warnings.append(f"Série Sentinel-2 mensuelle indisponible (RF) : {_error_message(s2_monthly_result)}")
         if isinstance(rain_result, BaseException):
             warnings.append(f"Précipitations indisponibles : {_error_message(rain_result)}")
 
@@ -1241,26 +1326,22 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
         planting = detect_planting_date(time_series["s2"], time_series["s1"])
         agro = compute_agro_score(sat_data, planting, time_series)
-        hf_result = await _call_hf_model_safely(satellite_image, warnings) if satellite_image else None
-
-        from app.services.s2_time_series import fetch_s2_monthly_series
+        # Modele HuggingFace (Andriatonny) desactive : hf_result reste None.
+        # Pour le reactiver, restaurer la ligne ci-dessous et supprimer la suivante :
+        # hf_result = await _call_hf_model_safely(satellite_image, warnings) if satellite_image else None
+        hf_result = None  # desactive volontairement
 
         # Verdict prioritaire : RF saisonnier (modèle entraîné hors-ligne, série S2 12 mois).
         # Replis dans l'ordre : classifieur logistique Sentinel-2 calibré terrain, puis
         # l'ancienne fusion CNN (modèle HF andritonny, conservé) + score agro.
-        s2_monthly: list[dict[str, Any]] = []
         rf = None
-        if access_token:
+        if s2_monthly:
             try:
-                s2_monthly = await fetch_s2_monthly_series(access_token, project_id, parcel_polygon)
-            except Exception as error:  # noqa: BLE001
-                warnings.append(f"Série Sentinel-2 mensuelle indisponible (RF) : {_error_message(error)}")
-            try:
-                rf = classify_barley_rf(s2_monthly) if s2_monthly else None
+                rf = classify_barley_rf(s2_monthly)
             except Exception as error:  # noqa: BLE001
                 logger.warning("Classifieur RF orge en échec : %s", error)
                 rf = None
-            if s2_monthly and rf is None:
+            if rf is None:
                 warnings.append("Classifieur RF indisponible (modèle absent ou série trop courte).")
 
         s2 = classify_barley_s2(sat_data)
@@ -1310,7 +1391,7 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if sat_data["vhVvRatio"] is not None and sat_data["vhVvRatio"] > 0.45:
             risk_factors.append("Structure radar type forêt")
         if not hybrid["final_is_barley"] and hybrid["final_confidence"] > 70:
-            risk_factors.append("Verdict non-orge avec une confiance élevée")
+            risk_factors.append("Classement « Autre culture » avec une confiance élevée")
 
         detail_parts = []
         if rf:
@@ -1318,7 +1399,7 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if s2:
             detail_parts.append(f"Sentinel-2: orge {js_round(s2['probability'] * 100)}%")
         cnn_label = "CNN (indicatif)" if (rf or s2) else "CNN"
-        detail_parts.append(f"{cnn_label}: {'orge' if hf_result['is_barley'] else 'non-orge'} ({hf_result['confidence']:.1f}%)" if hf_result else f"{cnn_label}: indisponible")
+        detail_parts.append(f"{cnn_label}: {'orge' if hf_result['is_barley'] else 'autre culture'} ({hf_result['confidence']:.1f}%)" if hf_result else f"{cnn_label}: indisponible")
         detail_parts.append(f"Agro{' (indicatif)' if (rf or s2) else ''}: {agro['score']}%")
         if not (rf or s2):
             detail_parts.append(f"Hybride: {hybrid['hybrid_score']}%")
@@ -1330,23 +1411,23 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
 
         if rf:
             recommendations = (
-                f"{'Orge' if rf['is_barley'] else 'Non-orge'} selon la dynamique saisonnière Sentinel-2 de la parcelle "
+                f"{'Orge' if rf['is_barley'] else 'Autre culture'} selon la dynamique saisonnière Sentinel-2 de la parcelle "
                 f"(probabilité d'orge {js_round(rf['probability'] * 100)}%). {rf_calibration_note()}"
             )
         elif s2:
             recommendations = (
-                f"{'Orge' if s2['is_barley'] else 'Non-orge'} selon les indices Sentinel-2 de la parcelle "
+                f"{'Orge' if s2['is_barley'] else 'Autre culture'} selon les indices Sentinel-2 de la parcelle "
                 f"(probabilité d'orge {js_round(s2['probability'] * 100)}%). {s2_calibration_note(s2)}"
             )
         elif hf_result:
             recommendations = (
-                f"Orge {'confirmée' if hybrid['final_confidence'] > 70 else 'probable'}. Score hybride {hybrid['hybrid_score']}% (CNN {js_round(hf_result['confidence'])}% + Agro {agro['score']}%)."
+                f"Orge {'confirmée' if hybrid['final_confirmed'] else 'à vérifier'}. Score final {hybrid['hybrid_score']}% (CNN {js_round(hf_result['confidence'])}% + Agro {agro['score']}%)."
                 if hybrid["final_is_barley"]
-                else f"Non-orge détecté. Score hybride {hybrid['hybrid_score']}%. Vérification terrain recommandée."
+                else f"Autre culture détectée. Score hybride {hybrid['hybrid_score']}%. Vérification terrain recommandée."
             )
         else:
             recommendations = (
-                f"{'Orge probable' if hybrid['final_is_barley'] else 'Non-orge probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score {agro['score']}%). Vérification terrain recommandée."
+                f"{'Orge confirmée' if hybrid['final_confirmed'] else 'Orge à vérifier' if hybrid['final_is_barley'] else 'Autre culture probable'} (modèle CNN indisponible, estimation basée uniquement sur les règles agronomiques, score final {hybrid['hybrid_score']}%). Vérification terrain recommandée."
             )
 
         response = {
@@ -1361,7 +1442,11 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             "hf_available": hf_result is not None,
             "verdict": hybrid["final_verdict"],
             "details": " | ".join(detail_parts),
-            "culture_detected": ("Orge" if hybrid["final_is_barley"] else "Non-orge") if (rf or s2) else (("Orge" if hf_result["is_barley"] else "Non-orge") if hf_result else None),
+            "culture_detected": (
+                detected_culture_label(hybrid["final_is_barley"])
+                if (rf or s2)
+                else (detected_culture_label(hf_result["is_barley"]) if hf_result else None)
+            ),
             "confidence": hybrid["final_confidence"] if (rf or s2) else (hf_result["confidence"] if hf_result else None),
             "cnn_prob_barley": hf_result["prob_barley"] if hf_result else None,
             "cnn_prob_non_barley": hf_result["prob_non_barley"] if hf_result else None,
@@ -1396,5 +1481,5 @@ async def analyze_parcel(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         }
         return 200, response
     except Exception as error:  # noqa: BLE001
-        logger.error("analyze-parcel error: %s", error, exc_info=error)
-        return 500, {"error": str(error) or "Unknown error"}
+        logger.error("analyze-parcel error: %s", redact_api_keys(str(error)), exc_info=error)
+        return 500, {"error": redact_api_keys(str(error)) or "Unknown error"}

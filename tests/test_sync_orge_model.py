@@ -24,7 +24,7 @@ def test_non_random_forest_bundle_is_rejected(tmp_path):
 
     errors = _validate(broken, tmp_path)
 
-    assert any("RandomForestClassifier" in error for error in errors)
+    assert any("non pris en charge" in error for error in errors)
     assert any("au lieu de 48" in error for error in errors)
 
 

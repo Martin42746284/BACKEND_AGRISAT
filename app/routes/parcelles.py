@@ -6,13 +6,14 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, update
 
 from app import cache
 from app.db import async_session_maker
 from app.errors import parse_or_400
 from app.models import Parcelle
 from app.schemas import DeleteParcelleParams, ParcelleCreate, ParcelleUpdate
+from app.services.parcel_registry import find_same_parcel_rows
 
 logger = logging.getLogger("agrisat.routes.parcelles")
 
@@ -50,7 +51,11 @@ async def list_parcelles() -> JSONResponse:
         rows = await cache.load_parcelles()
         return JSONResponse(content=[_serialize(r) for r in rows])
     except Exception as error:  # noqa: BLE001
-        logger.error("parcelles: read failed: %s", error)
+        logger.error(
+            "parcelles: read failed (%s): %s",
+            type(error).__name__,
+            cache.describe_error(error),
+        )
         return JSONResponse(status_code=503, content={"error": "Les parcelles sont temporairement indisponibles."})
 
 
@@ -108,6 +113,60 @@ async def create_parcelle(request: Request) -> JSONResponse:
     return JSONResponse(status_code=201, content=result)
 
 
+# Données de culture attachées à une parcelle : effacées quand l'utilisateur supprime la
+# culture, alors que le contour, l'identité et la localisation de la parcelle restent.
+_CULTURE_FIELDS = (
+    "culture_declared", "culture_detected", "ndvi_percentage", "ndre", "spectral_bands",
+    "confidence", "verdict", "details", "saison", "soil_type", "risk_factors",
+    "recommendations", "time_series_s1", "time_series_s2", "time_series_rain",
+    "estimated_planting_date", "estimated_harvest_date", "days_since_planting",
+    "growth_stage", "planting_confidence", "evi", "savi", "ndwi", "agro_score",
+    "hybrid_score", "cnn_prob_barley", "cnn_prob_non_barley",
+)
+# Colonnes JSONB de culture : une liste vide est plus sûre qu'un NULL pour les consommateurs.
+_CULTURE_LIST_FIELDS = {"risk_factors", "time_series_s1", "time_series_s2", "time_series_rain"}
+
+
+@router.delete("/api/parcelles/{parcelle_id}/culture")
+async def delete_parcelle_culture(parcelle_id: str) -> Response:
+    """Supprime la culture d'une parcelle **sans** supprimer la parcelle.
+
+    Le contour, la superficie et l'identité de la parcelle restent en base (donc sur
+    la carte) ; seules les données de culture sont effacées : classification, indice
+    de confiance, indices spectraux, cycle cultural, sol, risques, recommandations et
+    séries temporelles. L'opération est idempotente.
+
+    Les lignes doublons qui décrivent exactement la même parcelle (contour importé
+    et tracé manuel superposés, réanalyses successives…) sont vidées elles aussi :
+    sinon leur culture réapparaîtrait sur la carte après la suppression.
+    """
+    try:
+        parsed = DeleteParcelleParams.model_validate({"id": parcelle_id})
+    except ValidationError:
+        return JSONResponse(status_code=400, content={"error": "Identifiant invalide"})
+
+    parcelle_uuid = uuid.UUID(parsed.id)
+    async with async_session_maker() as session:
+        existing = await session.get(Parcelle, parcelle_uuid)
+        if existing is None:
+            return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
+
+        same_parcel_rows = await find_same_parcel_rows(session, existing)
+        target_ids = {row.id for row in same_parcel_rows} | {parcelle_uuid}
+        await session.execute(
+            update(Parcelle)
+            .where(Parcelle.id.in_(target_ids))
+            .values(**{
+                field: [] if field in _CULTURE_LIST_FIELDS else None
+                for field in _CULTURE_FIELDS
+            })
+        )
+        await session.commit()
+
+    cache.invalidate()
+    return Response(status_code=204)
+
+
 @router.delete("/api/parcelles/{parcelle_id}")
 async def delete_parcelle(parcelle_id: str) -> Response:
     try:
@@ -148,7 +207,9 @@ async def update_parcelle(parcelle_id: str, request: Request) -> JSONResponse:
         if existing is None:
             return JSONResponse(status_code=404, content={"error": "Parcelle introuvable"})
 
-        update_data = parsed_update.model_dump(exclude_unset=True)
+        # `mode="json"` convertit le contour (liste de Point) en lignes {lat, lng} :
+        # la colonne est un JSONB, un modèle Pydantic n'y serait pas sérialisable.
+        update_data = parsed_update.model_dump(exclude_unset=True, mode="json")
         for field, value in update_data.items():
             setattr(existing, field, value)
 

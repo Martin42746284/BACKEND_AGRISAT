@@ -1,7 +1,9 @@
 """Séries temporelles Sentinel-2 mensuelles par parcelle, pour le classifieur RF orge.
 
-Contrairement à `_fetch_time_series` de analyze_parcel.py (NDVI/S1 pour l'affichage),
-ce module extrait les 10 bandes de réflectance + les 4 indices du dataset
+Le frontend affiche aussi une série S2 courte (NDVI sur 6 mois) : elle est dérivée
+de cette série de 12 mois (`_s2_display_series` de analyze_parcel.py) au lieu d'être
+recalculée par des appels GEE supplémentaires. Ce module extrait les 10 bandes de
+réflectance + les 4 indices du dataset
 d'entraînement (NDVI, EVI, NDRE, NDMI) sur les 12 derniers mois, via un appel GEE
 `value:compute` par mois (médiane mensuelle + reduceRegion mean) réutilisant
 l'expression éprouvée `_build_s2_expression` de analyze_parcel.py.

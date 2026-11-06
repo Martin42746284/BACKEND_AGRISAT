@@ -32,6 +32,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from app.services.orge_scoring import is_barley_confirmed
+
 logger = logging.getLogger("agrisat.services.barley_rf_classifier")
 
 MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "models" / "orge_rf"
@@ -39,11 +41,8 @@ MODEL_PATH = MODEL_DIR / "orge_rf.joblib"
 METRICS_PATH = MODEL_DIR / "metrics.json"
 THRESHOLD_PATH = MODEL_DIR / "threshold_selection.json"
 
-#: verdict à trois niveaux de predict_orge.py (projet Orge)
-AUTO_ORGE_THRESHOLD = 0.70
+#: seuil de rejet historique, utilisé seulement quand aucun seuil de modèle n'est fourni
 REJECT_THRESHOLD = 0.15
-MAX_OCT_NDVI = 0.50
-MAX_DOY_PEAK = 245
 
 #: en dessous : pas de verdict parcelle (série inexploitable)
 MIN_VALID_OBSERVATIONS = 1
@@ -144,7 +143,7 @@ def _cycle_features(frame: pd.DataFrame) -> dict[str, float]:
 
 
 def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
-    """Construit les 48 variables du modèle à partir de la série mensuelle S2.
+    """Construit les variables du modèle à partir de la série mensuelle S2.
 
     `series` : [{date: 'YYYY-MM', B2…B12, NDVI, EVI, NDRE, NDMI}, ...].
     Retourne un DataFrame (une ligne par date) ou None si la série est vide ou
@@ -206,6 +205,47 @@ def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
     stats["drop_sep_oct"] = stats["NDVI_sep"] - stats["NDVI_oct"]
     stats["ratio_oct_max"] = stats["NDVI_oct"] / (max_ndvi + 1e-4)
     stats["ramp_jun_to_aug"] = stats["NDVI_aug"] - stats["NDVI_jun"]
+    # Features cibles pour separer orge vs cultures vertes persistantes
+    stats["ndvi_oct_sep_ratio"] = stats["NDVI_oct"] / (stats["NDVI_sep"] + 1e-4)
+    stats["ndvi_oct_aug_ratio"] = stats["NDVI_oct"] / (stats["NDVI_aug"] + 1e-4)
+    stats["ndvi_sep_aug_ratio"] = stats["NDVI_sep"] / (stats["NDVI_aug"] + 1e-4)
+    stats["late_green"] = 1.0 if stats["NDVI_oct"] > stats["NDVI_sep"] + 0.05 else 0.0
+    peak_late = max(stats["NDVI_aug"], stats["NDVI_sep"])
+    stats["green_persistence_oct"] = stats["NDVI_oct"] / (peak_late + 1e-4)
+
+    # Variables du modèle 64 variables (orge_model.MADAGASCAR_FEATURES) :
+    # persistance, forme du pic et cumuls juin-octobre. Sans elles, le modèle
+    # recevait des zéros à la place de mesures pourtant discriminantes.
+    stats["ndvi_oct_mean_ratio"] = stats["NDVI_oct"] / (mean_ndvi + 1e-4)
+    stats["slope_post_peak_oct"] = max_ndvi - stats["NDVI_oct"]
+    stats["peak_width_proxy"] = stats["drop_max_to_oct"] / (max_ndvi + 1e-4)
+    # Courbe mai-octobre ; juillet n'est pas échantillonné, il reprend juin
+    # (même repli que orge_model.py : `ndvi_jul = NDVI_jun`).
+    months = np.array([6.0, 7.0, 8.0, 9.0, 10.0])
+    ndvi_curve = np.array(
+        [
+            stats["NDVI_jun"],
+            stats["NDVI_jun"],
+            stats["NDVI_aug"],
+            stats["NDVI_sep"],
+            stats["NDVI_oct"],
+        ],
+        dtype=float,
+    )
+    trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")  # NumPy 1.x : np.trapz
+    stats["ndvi_auc_jun_sep"] = float(trapezoid(ndvi_curve[:4], months[:4]))
+    stats["ndvi_auc_jun_oct"] = float(trapezoid(ndvi_curve, months))
+    stats["months_green_geq04"] = float(int((ndvi_curve >= 0.4).sum()))
+    stats["months_green_geq05"] = float(int((ndvi_curve >= 0.5).sum()))
+    stats["oct_sep_diff"] = stats["NDVI_oct"] - stats["NDVI_sep"]
+    stats["sep_aug_diff"] = stats["NDVI_sep"] - stats["NDVI_aug"]
+    stats["post_peak_green_score"] = float(
+        np.maximum(ndvi_curve[1] - 0.4, 0)
+        + np.maximum(stats["NDVI_aug"] - 0.4, 0)
+        + np.maximum(stats["NDVI_sep"] - 0.4, 0)
+        + np.maximum(stats["NDVI_oct"] - 0.4, 0)
+    )
+    stats["peak_month_late"] = 1.0 if doy_peak > 250 else 0.0
     stats.update(_cycle_features(frame))
 
     row_columns = [*SPECTRAL_BANDS, *VEGETATION_INDICES, "PSRI", "MSI", "month", "day_of_year"]
@@ -220,13 +260,24 @@ def build_features(series: list[dict[str, Any]]) -> pd.DataFrame | None:
     return rows[features].astype(float).fillna(0.0)
 
 
-def _verdict(probability: float, ndvi_oct: float, doy_peak: float) -> str:
-    """Verdict à trois niveaux de predict_orge.py, appliqué au niveau parcelle."""
-    if probability < REJECT_THRESHOLD:
-        return "NON_ORGE"
-    if probability >= AUTO_ORGE_THRESHOLD and ndvi_oct <= MAX_OCT_NDVI and doy_peak <= MAX_DOY_PEAK:
-        return "ORGE"
-    return "A_VERIFIER"
+def _verdict(
+    probability: float,
+    ndvi_oct: float | None = None,
+    doy_peak: float | None = None,
+    threshold: float = REJECT_THRESHOLD,
+) -> str:
+    """Verdict parcelle : rejet sous le seuil du modèle, puis score final +10 / ≥60 %.
+
+    `ndvi_oct` et `doy_peak` restent acceptés pour compatibilité avec l'ancien
+    verdict à trois niveaux, mais ne conditionnent plus la confirmation : seules
+    les nouvelles règles de score (voir `orge_scoring`) décident ORGE / À VÉRIFIER.
+
+    Hors orge, la classe est « AUTRE_CULTURE » : l'application n'a pas de statut
+    « NON_ORGE » (libellé historique du classifieur binaire).
+    """
+    if probability < threshold:
+        return "AUTRE_CULTURE"
+    return "ORGE" if is_barley_confirmed(probability * 100) else "A_VERIFIER"
 
 
 def classify(series: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -248,7 +299,7 @@ def classify(series: list[dict[str, Any]]) -> dict[str, Any] | None:
         "probability": probability,
         "is_barley": probability >= threshold,
         "threshold": threshold,
-        "verdict": _verdict(probability, ndvi_oct, doy_peak),
+        "verdict": _verdict(probability, ndvi_oct, doy_peak, threshold),
         "n_features": len(model["features"]),
         "n_observations": int(len(features)),
         "ndvi_oct": round(ndvi_oct, 4),

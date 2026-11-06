@@ -73,7 +73,11 @@ TRANCHES = [(0, 0.1, "< 0,1 ha"), (0.1, 0.5, "0,1-0,5 ha"),
 
 # Version du format de cache : a incrementer quand le modele de tracage change
 # (serve_vhr.py POIDS), pour ne plus servir les traces de l'ancien modele.
-VHR_CACHE_VERSION = 2
+# v3 : passage au checkpoint de segmentation delineate_jecam_v3_precision
+# (le meme modele que /api/field-segmentation) ; les traces v2 sont ignores.
+# v4 : pretraitement de lisibilite (CLAHE + nettete) avant le modele ; les
+# traces v3, produits sur l'image brute, ne sont plus servis.
+VHR_CACHE_VERSION = 4
 
 AVERTISSEMENT_FIABILITE = {
     "simple": (

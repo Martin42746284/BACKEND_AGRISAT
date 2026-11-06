@@ -1,6 +1,6 @@
 """Route /api/modeles : inventaire des modeles IA reels deployes (MALTO).
 
-- Classification orge / non-orge : pipeline sklearn RandomForest (projet ASA/Orge,
+- Classification orge / autre culture : pipeline sklearn RandomForest (projet ASA/Orge,
   app/data/models/orge_rf), metriques et seuil reels lus dans metrics.json et
   threshold_selection.json.
 - Segmentation de parcelles : modele YOLO11-seg embarque dans le backend
@@ -24,6 +24,7 @@ import httpx
 from fastapi import APIRouter
 
 from app.config import settings
+from app.services.barley_rf_classifier import load_model as load_barley_model
 
 logger = logging.getLogger("agrisat.routes.modeles")
 
@@ -52,14 +53,26 @@ def _read_json(path: Path) -> dict:
 
 
 def _rf_orge_model() -> dict:
-    """Modele RF orge/non-orge embarque : presence + metriques du projet Orge."""
+    """Modele RF orge / autre culture embarque : presence + metriques du projet Orge."""
     info: dict = {
-        "nom": "Classification orge / non-orge",
+        "nom": "Classification orge / autre culture",
         "type": "Random Forest (scikit-learn) — 48 variables spectrales-temporelles Sentinel-2",
         "fichier": RF_MODEL_PATH.name,
         "present": RF_MODEL_PATH.is_file(),
         "statut": "indisponible",
     }
+    # Modèle réellement chargé en mémoire par le processus (et non seulement les
+    # fichiers sur disque) : permet de vérifier que l'application utilise bien la
+    # dernière version après une mise à jour des artefacts joblib.
+    loaded = load_barley_model()
+    if loaded is not None:
+        info["modele_charge"] = {
+            "version": loaded["summary"].get("production_model", "orge_rf"),
+            "seuil": loaded["threshold"],
+            "n_features": len(loaded["features"]),
+            "n_lignes": loaded["summary"].get("trained_on_rows"),
+            "n_parcelles": loaded["summary"].get("trained_on_parcels"),
+        }
     metrics = _read_json(RF_METRICS_PATH)
     selection = _read_json(RF_THRESHOLD_PATH)
     if metrics:

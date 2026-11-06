@@ -81,6 +81,33 @@ soit 0,4-6 % de l'image au lieu de 19-53 %.
 ~20 s) pour un `--reload` immédiat : les modèles se chargent alors à la
 première requête.
 
+### Import de parcelles depuis des KML
+
+Les délimitations déjà dessinées (Google Earth, etc.) peuvent être injectées
+directement en base, sans passer par le traçage manuel ou automatique et sans
+importer les cultures :
+
+```bash
+python scripts/import_kml_parcels.py                 # rapport (dry-run), aucune écriture
+python scripts/import_kml_parcels.py --apply         # insère les nouveaux contours
+python scripts/import_kml_parcels.py --json-report rapport.json
+```
+
+Le script lit tous les `*.kml` de `kml/` (ou `--kml-dir`), ne garde que les
+polygones, répare les anneaux invalides et calcule centre/surface. Il est
+**additif et idempotent** :
+
+- aucune parcelle existante n'est modifiée ou supprimée ;
+- un contour déjà présent en base (IoU ≥ 0,60) est ignoré ;
+- les lignes « Tracé automatique supprimé » ne bloquent pas un contour KML
+  explicite (elles ne concernent que les tracés automatiques) ;
+- deux contours quasi identiques dans les KML (IoU ≥ 0,80) sont fusionnés ;
+- les lignes créées portent `data_source = "Import KML"`, des libellés neutres
+  (`Parcelle KML 001`, …) et tous les champs de culture/analyse restent `NULL`.
+
+Les seuils sont réglables avec `--existing-iou` et `--import-iou`. Une nouvelle
+exécution après ajout de fichiers ne réinsère pas les contours déjà importés.
+
 ## Prérequis
 
 - [Python](https://www.python.org/) 3.11 ou supérieur
@@ -120,20 +147,26 @@ Vérification : `ls -l app/data/parcelles_ftw.parquet` doit afficher environ
 
 ### Poids du modèle de traçage VHR
 
-Le service de traçage (`agri_field_segmentation/src/serve_vhr.py`) utilise
-`data/vhr/weights/delineate_jecam_v2_affine_annotations.pt` dans le projet
-`sibling`. Sans ce fichier, le service refuse de démarrer
-(`Poids absents : …`) et `POST /api/zone-parcels` renvoie **503**.
+Le service de traçage (`agri_field_segmentation/src/serve_vhr.py`) utilise le
+même modèle que `/api/field-segmentation` : le checkpoint de segmentation
+`data/vhr/weights/delineate_jecam_v3_precision.pt` (clone du fichier
+`app/data/models/field_segmentation/parcel_segmentation_yolo.pt`). La
+détection d'une zone (`/api/zone-parcels`) télécharge les tuiles Esri, lance le
+modèle YOLO11-seg fenêtre par fenêtre puis nettoie les contours.
 
-Le checkpoint correspond à `epoch30.pt` du run
-`outputs/vhr_training/jecam_v2_affine_annotations/` (sélection par F1 sur les
-annotations complètes de validation, cf. `train_vhr.py`). Il est reproduit à
-l'identique par :
+Le checkpoint n'est pas versionné. Le service refuse de démarrer
+(`Poids absents : …`) si ni le fichier local ni le modèle embarqué n'existent.
+Copy du produit final :
 
 ```bash
-cp agri_field_segmentation/outputs/vhr_training/jecam_v2_affine_annotations/weights/epoch30.pt \
-   agri_field_segmentation/data/vhr/weights/delineate_jecam_v2_affine_annotations.pt
+cp agri_field_segmentation/outputs/vhr_training/jecam_v3/weights/best.pt \\
+   agri_field_segmentation/data/vhr/weights/delineate_jecam_v3_precision.pt
 ```
+
+Si le fichier est absent, `serve_vhr.py` reporte automatiquement sur le
+service embarqué du backend ; pour l'exploiter directement, il doit exister
+soit `data/vhr/weights/delineate_jecam_v3_precision.pt`, soit la variable
+`VHR_WEIGHTS`.
 
 ### Base de données lente
 
@@ -143,7 +176,7 @@ réseau lent, la requête peut dépasser le délai imparti et l'API répond alor
 **503** au lieu de servir les parcelles. Le délai est réglable :
 
 ```bash
-PARCELS_QUERY_TIMEOUT_S=90   # défaut : 20 (suffisant pour une base proche)
+PARCELS_QUERY_TIMEOUT_S=60   # défaut : 60 (base distante type Neon, lien lent)
 ```
 
 ## Configuration
@@ -224,6 +257,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 3001
 | `GET`     | `/api/parcelles`                      | Liste les parcelles enregistrées (avec cache court)                      |
 | `POST`    | `/api/parcelles`                      | Crée une parcelle                                                        |
 | `DELETE`  | `/api/parcelles/:id`                  | Supprime une parcelle                                                    |
+| `GET`     | `/api/bornes-gps`                     | Liste les bornes GPS (filtre optionnel `?q=nom`)                         |
+| `POST`    | `/api/bornes-gps`                     | Enregistre une borne GPS nommée                                          |
+| `PATCH`   | `/api/bornes-gps/:id`                 | Renomme une borne GPS                                                    |
+| `DELETE`  | `/api/bornes-gps/:id`                 | Supprime une borne GPS                                                   |
 | `POST`    | `/api/detect-parcels`                 | Détection automatique de parcelles autour d'un point (avec repli si la base est indisponible) |
 | `POST`    | `/api/detect-parcels-fallback`        | Détection automatique de parcelles (variante sans repli)                 |
 | `POST`    | `/api/analyze-parcel`                 | Analyse détaillée d'une parcelle (indices spectraux, séries temporelles) |
@@ -245,13 +282,15 @@ AGRISAT-BACKEND/
 │   ├── main.py                   # Point d'entrée FastAPI, CORS, handlers d'erreur, lifespan
 │   ├── config.py                 # Variables d'environnement (pydantic-settings)
 │   ├── db.py                     # Moteur SQLAlchemy async
-│   ├── models.py                 # Modèles SQLAlchemy (Parcelle, FieldScanRun, VhrRefinement)
+│   ├── models.py                 # Modèles SQLAlchemy (Parcelle, BorneGps, FieldScanRun, VhrRefinement)
 │   ├── schemas.py                # Schémas Pydantic (validation des requêtes)
 │   ├── errors.py                 # Gestion d'erreurs centralisée
 │   ├── cache.py                  # Cache TTL des parcelles
 │   ├── routes/                   # Endpoints HTTP
 │   └── services/                 # Logique métier (analyse GEE, watershed, zonage, ...)
 ├── migrations/                   # Migrations Alembic
+├── kml/                         # Fichiers KML sources (import de délimitations)
+├── scripts/                     # Scripts d'exploitation (modèles, import KML)
 ├── pyproject.toml                # Dépendances Python
 ├── alembic.ini
 └── .env.example                  # Modèle des variables d'environnement
